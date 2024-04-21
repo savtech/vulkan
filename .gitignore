@@ -1,0 +1,7 @@
+/.vs
+/.vscode
+/build
+/include
+*.exe
+*.pdb
+vk_validation.txt
