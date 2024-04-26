@@ -9,9 +9,6 @@ struct Vertex {
     Vec3 color;
 };
 
-// (-1.0, 0.0)(-0.5, -1.0)(0.0, 0.0)
-// (0.0, 0.0)(0.5, -1.0)(1.0, -1.0)
-
 static constexpr Vertex triangle_vertices[] = {
     { { -1.0f, 0.0f }, { 1.0f, 0.0f, 0.0f } },
     { { -0.5f, -1.0f }, { 0.0f, 1.0f, 0.0f } },
@@ -24,6 +21,20 @@ static constexpr Vertex triangle_vertices[] = {
     { { -0.5f, 1.0f }, { 1.0f, 0.0f, 0.0f } },
     { { 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f } },
     { { 0.5f, 1.0f }, { 0.0f, 0.0f, 1.0f } },
+};
+
+static constexpr Vertex triforce_vertices[] = {
+    { { -0.5f, 0.0f }, { 1.0f, 0.0f, 0.0f } },
+    { { 0.0f, -1.0f }, { 0.0f, 1.0f, 0.0f } },
+    { { 0.5f, 0.0f }, { 0.0f, 0.0f, 1.0f } },
+
+    { { -1.0f, 1.0f }, { 1.0f, 0.0f, 0.0f } },
+    { { -0.5f, 0.0f }, { 0.0f, 1.0f, 0.0f } },
+    { { 0.0f, 1.0f }, { 0.0f, 0.0f, 1.0f } },
+
+    { { 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f } },
+    { { 0.5f, 0.0f }, { 0.0f, 1.0f, 0.0f } },
+    { { 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f } },
 };
 
 struct QueueFamily {
@@ -157,7 +168,7 @@ struct VulkanRenderer {
     bool resizing = false;
     bool should_render = true;
     bool fixed_frame_mode = false;
-    size_t frames_to_render = 500000;
+    size_t frames_to_render = 10;
 };
 
 struct VulkanRendererInitInfo {

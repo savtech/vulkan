@@ -107,7 +107,7 @@ VkResult create_renderer(VulkanRendererInitInfo* vulkan_renderer_init_info) {
         .fence_count = 0
     };
 
-    result = allocate_command_buffers(renderer, &graphics_queue_command_buffer_allocation_info);
+    result = allocate_command_buffers(renderer, &transfer_queue_command_buffer_allocation_info);
     if(result != VK_SUCCESS) {
         printf("allocate_command_buffers() [QueueFamilies::Type::TRANSFER] failed.\n");
         return result;
@@ -115,8 +115,8 @@ VkResult create_renderer(VulkanRendererInitInfo* vulkan_renderer_init_info) {
 
     VkDeviceSize buffer_sizes = sizeof(Vertex) * 9;
     u32 shared_buffer_queue_family_indices[] = {
-        static_cast<u32>(QueueFamilies::Type::GRAPHICS),
-        static_cast<u32>(QueueFamilies::Type::TRANSFER)
+        static_cast<u32>(renderer->devices.queue_families.families[static_cast<u32>(QueueFamilies::Type::GRAPHICS)].index),
+        static_cast<u32>(renderer->devices.queue_families.families[static_cast<u32>(QueueFamilies::Type::TRANSFER)].index)
     };
 
     //Staging Buffer
@@ -135,6 +135,15 @@ VkResult create_renderer(VulkanRendererInitInfo* vulkan_renderer_init_info) {
         if(result != VK_SUCCESS) {
             printf("create_buffer() failed. [Staging Buffer]\n");
             return result;
+        } else {
+            void* data;
+            result = vkMapMemory(renderer->devices.logical.device, renderer->graphics_pipeline.staging_buffer.device_memory, 0, buffer_sizes, 0, &data);
+            if(result != VK_SUCCESS) {
+                printf("vkMapMemory() failed.\n");
+                return result;
+            }
+            memcpy_s(data, buffer_sizes, triforce_vertices, buffer_sizes);
+            vkUnmapMemory(renderer->devices.logical.device, renderer->graphics_pipeline.staging_buffer.device_memory);
         }
     }
 
@@ -168,13 +177,22 @@ VkResult create_renderer(VulkanRendererInitInfo* vulkan_renderer_init_info) {
             .pWaitSemaphores = nullptr,
             .pWaitDstStageMask = 0,
             .commandBufferCount = 1,
-            .pCommandBuffers = &renderer->devices.command_pools[static_cast<u32>(QueueFamilies::Type::TRANSFER)].command_buffers[0],
+            .pCommandBuffers = renderer->devices.command_pools[static_cast<u32>(QueueFamilies::Type::TRANSFER)].command_buffers,
             .signalSemaphoreCount = 0,
             .pSignalSemaphores = nullptr
         };
 
-        vkQueueSubmit(renderer->devices.queue_families.families[1].queues[0], 1, &submit_info, VK_NULL_HANDLE);
-        vkQueueWaitIdle(renderer->devices.queue_families.families[1].queues[0]);
+        result = vkQueueSubmit(renderer->devices.queue_families.families[1].queues[0], 1, &submit_info, VK_NULL_HANDLE);
+        if(result != VK_SUCCESS) {
+            printf("VkQueueSubmit failed()\n");
+            return result;
+        }
+
+        result = vkQueueWaitIdle(renderer->devices.queue_families.families[1].queues[0]);
+        if(result != VK_SUCCESS) {
+            printf("vkQueueWaitIdle failed()\n");
+            return result;
+        }
     }
 
     return result;
@@ -1025,8 +1043,9 @@ VkResult allocate_command_buffers(VulkanRenderer* renderer, CommandBufferAllocat
     VkResult result = VK_ERROR_UNKNOWN;
 
     //The following can maybe be a function call with a signature like: size_t get_queue_family_index(QueueFamilies::Type type) and we'll keep track of specific indices
-    //for graphics, compute, etc. families in some array in the QueueFamilies struct. This will always return index 0 as we only have the GRAPHICS type in the enum currently
-    size_t command_pool_index = static_cast<size_t>(command_buffer_allocation_info->pool_type);
+    //for graphics, compute, etc. families in some array in the QueueFamilies struct.
+    size_t pool_type_index = static_cast<size_t>(command_buffer_allocation_info->pool_type);
+    size_t command_pool_index = renderer->devices.queue_families.families[pool_type_index].index;
 
     renderer->devices.command_pools[command_pool_index].command_buffers = (VkCommandBuffer*)malloc(sizeof(VkCommandBuffer) * command_buffer_allocation_info->buffer_count);
     renderer->devices.command_pools[command_pool_index].synchro = (Synchronization*)malloc(sizeof(Synchronization) * command_buffer_allocation_info->buffer_count);
@@ -1043,42 +1062,50 @@ VkResult allocate_command_buffers(VulkanRenderer* renderer, CommandBufferAllocat
     result = vkAllocateCommandBuffers(renderer->devices.logical.device, &command_buffer_allocate_info, renderer->devices.command_pools[command_pool_index].command_buffers);
     if(result == VK_SUCCESS) {
         for(size_t command_buffer_index = 0; command_buffer_index < command_buffer_allocation_info->buffer_count; ++command_buffer_index) {
-            renderer->devices.command_pools->synchro[command_buffer_index].semaphores = (VkSemaphore*)malloc(sizeof(VkSemaphore) * command_buffer_allocation_info->semaphore_count[command_buffer_index]);
-            renderer->devices.command_pools->synchro[command_buffer_index].fences = (VkFence*)malloc(sizeof(VkFence) * command_buffer_allocation_info->fence_count[command_buffer_index]);
+            if(command_buffer_allocation_info->semaphore_count != NULL) {
+                renderer->devices.command_pools->synchro[command_buffer_index].semaphores = (VkSemaphore*)malloc(sizeof(VkSemaphore) * command_buffer_allocation_info->semaphore_count[command_buffer_index]);
 
-            VkSemaphoreCreateInfo semaphore_create_info = {
-                .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
-                .pNext = nullptr,
-                .flags = 0
-            };
+                VkSemaphoreCreateInfo semaphore_create_info = {
+                    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+                    .pNext = nullptr,
+                    .flags = 0
+                };
 
-            VkFenceCreateInfo fence_create_info = {
-                .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-                .pNext = nullptr,
-                .flags = VK_FENCE_CREATE_SIGNALED_BIT //Lets us bypass fence waiting on first frame
-            };
-
-            for(size_t semaphore_index = 0; semaphore_index < command_buffer_allocation_info->semaphore_count[command_buffer_index]; ++semaphore_index) {
-                result = vkCreateSemaphore(renderer->devices.logical.device, &semaphore_create_info, nullptr, &renderer->devices.command_pools[command_pool_index].synchro[command_buffer_index].semaphores[semaphore_index]);
-                if(result == VK_SUCCESS) {
-                    renderer->devices.command_pools[command_pool_index].synchro->semaphore_count++;
-                } else {
-                    printf("vkCreateSemaphore() failed. [Semaphore Index: %zd]\n", semaphore_index);
-                    return result;
+                for(size_t semaphore_index = 0; semaphore_index < command_buffer_allocation_info->semaphore_count[command_buffer_index]; ++semaphore_index) {
+                    result = vkCreateSemaphore(renderer->devices.logical.device, &semaphore_create_info, nullptr, &renderer->devices.command_pools[command_pool_index].synchro[command_buffer_index].semaphores[semaphore_index]);
+                    if(result == VK_SUCCESS) {
+                        renderer->devices.command_pools[command_pool_index].synchro->semaphore_count++;
+                    } else {
+                        printf("vkCreateSemaphore() failed. [Semaphore Index: %zd]\n", semaphore_index);
+                        return result;
+                    }
                 }
+            } else {
+                renderer->devices.command_pools[command_pool_index].synchro->semaphore_count = 0;
             }
 
-            for(size_t fence_index = 0; fence_index < command_buffer_allocation_info->fence_count[command_buffer_index]; ++fence_index) {
-                result = vkCreateFence(renderer->devices.logical.device, &fence_create_info, nullptr, &renderer->devices.command_pools[command_pool_index].synchro[command_buffer_index].fences[fence_index]);
-                if(result == VK_SUCCESS) {
-                    renderer->devices.command_pools[command_pool_index].synchro->fence_count++;
-                } else {
-                    printf("vkCreateFence() failed. [Fence Index: %zd]\n", fence_index);
-                    return result;
+            if(command_buffer_allocation_info->fence_count != NULL) {
+                renderer->devices.command_pools->synchro[command_buffer_index].fences = (VkFence*)malloc(sizeof(VkFence) * command_buffer_allocation_info->fence_count[command_buffer_index]);
+
+                VkFenceCreateInfo fence_create_info = {
+                    .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+                    .pNext = nullptr,
+                    .flags = VK_FENCE_CREATE_SIGNALED_BIT //Lets us bypass fence waiting on first frame
+                };
+
+                for(size_t fence_index = 0; fence_index < command_buffer_allocation_info->fence_count[command_buffer_index]; ++fence_index) {
+                    result = vkCreateFence(renderer->devices.logical.device, &fence_create_info, nullptr, &renderer->devices.command_pools[command_pool_index].synchro[command_buffer_index].fences[fence_index]);
+                    if(result == VK_SUCCESS) {
+                        renderer->devices.command_pools[command_pool_index].synchro->fence_count++;
+                    } else {
+                        printf("vkCreateFence() failed. [Fence Index: %zd]\n", fence_index);
+                        return result;
+                    }
                 }
+            } else {
+                renderer->devices.command_pools[command_pool_index].synchro->fence_count = 0;
             }
         }
-
     } else {
         printf("vkAllocateCommandBuffers failed. Command Pool[%zd] Buffer Count[%zd]\n", command_pool_index, command_buffer_allocation_info->buffer_count);
         return result;
@@ -1093,7 +1120,7 @@ VkResult record_command_buffer(VulkanRenderer* renderer, VkCommandBuffer command
     VkCommandBufferBeginInfo command_buffer_begin_info = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .pNext = nullptr,
-        .flags = 0,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
         .pInheritanceInfo = nullptr
     };
 
@@ -1398,6 +1425,8 @@ VkResult create_buffer(VulkanRenderer* renderer, BufferAllocationInfo* buffer_al
             if(result != VK_SUCCESS) {
                 printf("vkAllcoateMemory() failed.\n");
                 return result;
+            } else {
+                vkBindBufferMemory(renderer->devices.logical.device, buffer_allocation_info->buffer->buffer, buffer_allocation_info->buffer->device_memory, 0);
             }
             break;
         }
@@ -1434,8 +1463,7 @@ VkResult record_staging_command_buffer(VulkanRenderer* renderer, VkDeviceSize si
     return result;
 }
 
-size_t
-get_queue_family_index(QueueFamilies::Type type) {
+size_t get_queue_family_index(QueueFamilies::Type type) {
     return 0;
 }
 
