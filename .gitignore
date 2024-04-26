@@ -5,4 +5,5 @@
 /include
 *.exe
 *.pdb
+*.gfxr
 vk_validation.txt
