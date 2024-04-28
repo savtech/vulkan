@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <vector>
 #include "vulkan_renderer.h"
+#include "math.h"
 
 VkResult create_renderer(VulkanRendererInitInfo* vulkan_renderer_init_info) {
     VkResult result = VK_ERROR_UNKNOWN;
@@ -113,86 +114,34 @@ VkResult create_renderer(VulkanRendererInitInfo* vulkan_renderer_init_info) {
         return result;
     }
 
-    VkDeviceSize buffer_sizes = sizeof(Vertex) * 9;
-    u32 shared_buffer_queue_family_indices[] = {
-        static_cast<u32>(renderer->devices.queue_families.families[static_cast<u32>(QueueFamilies::Type::GRAPHICS)].index),
-        static_cast<u32>(renderer->devices.queue_families.families[static_cast<u32>(QueueFamilies::Type::TRANSFER)].index)
-    };
-
-    //Staging Buffer
-    {
-        BufferAllocationInfo staging_buffer_info = {
-            .buffer = &renderer->graphics_pipeline.staging_buffer,
-            .usage_flags = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-            .memory_properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            .size = buffer_sizes,
-            .sharing_mode = VK_SHARING_MODE_CONCURRENT,
-            .queue_families_indices_count = 2,
-            .queue_family_indices = shared_buffer_queue_family_indices
-        };
-
-        result = create_buffer(renderer, &staging_buffer_info);
-        if(result != VK_SUCCESS) {
-            printf("create_buffer() failed. [Staging Buffer]\n");
-            return result;
-        } else {
-            void* data;
-            result = vkMapMemory(renderer->devices.logical.device, renderer->graphics_pipeline.staging_buffer.device_memory, 0, buffer_sizes, 0, &data);
-            if(result != VK_SUCCESS) {
-                printf("vkMapMemory() failed.\n");
-                return result;
-            }
-            memcpy_s(data, buffer_sizes, triforce_vertices, buffer_sizes);
-            vkUnmapMemory(renderer->devices.logical.device, renderer->graphics_pipeline.staging_buffer.device_memory);
-        }
+    result = create_vertex_buffer(renderer);
+    if(result != VK_SUCCESS) {
+        printf("create_vertex_buffer() failed.\n");
+        return result;
     }
 
-    //Vertex Buffer
-    {
-        BufferAllocationInfo vertex_buffer_info = {
-            .buffer = &renderer->graphics_pipeline.vertex_buffer,
-            .usage_flags = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            .memory_properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-            .size = buffer_sizes,
-            .sharing_mode = VK_SHARING_MODE_CONCURRENT,
-            .queue_families_indices_count = 2,
-            .queue_family_indices = shared_buffer_queue_family_indices
-        };
-
-        result = create_buffer(renderer, &vertex_buffer_info);
-        if(result != VK_SUCCESS) {
-            printf("create_buffer() failed. [Vertex Buffer]\n");
-            return result;
-        }
+    result = create_index_buffer(renderer);
+    if(result != VK_SUCCESS) {
+        printf("create_index_buffer() failed.\n");
+        return result;
     }
 
-    record_staging_command_buffer(renderer, buffer_sizes);
+    result = create_uniform_buffers(renderer);
+    if(result != VK_SUCCESS) {
+        printf("create_index_buffer() failed.\n");
+        return result;
+    }
 
-    //Staging Queue Submit
-    {
-        VkSubmitInfo submit_info = {
-            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-            .pNext = nullptr,
-            .waitSemaphoreCount = 0,
-            .pWaitSemaphores = nullptr,
-            .pWaitDstStageMask = 0,
-            .commandBufferCount = 1,
-            .pCommandBuffers = renderer->devices.command_pools[static_cast<u32>(QueueFamilies::Type::TRANSFER)].command_buffers,
-            .signalSemaphoreCount = 0,
-            .pSignalSemaphores = nullptr
-        };
+    result = create_descriptor_pool(renderer);
+    if(result != VK_SUCCESS) {
+        printf("create_descriptor_pool() failed.\n");
+        return result;
+    }
 
-        result = vkQueueSubmit(renderer->devices.queue_families.families[1].queues[0], 1, &submit_info, VK_NULL_HANDLE);
-        if(result != VK_SUCCESS) {
-            printf("VkQueueSubmit failed()\n");
-            return result;
-        }
-
-        result = vkQueueWaitIdle(renderer->devices.queue_families.families[1].queues[0]);
-        if(result != VK_SUCCESS) {
-            printf("vkQueueWaitIdle failed()\n");
-            return result;
-        }
+    result = create_descriptor_sets(renderer);
+    if(result != VK_SUCCESS) {
+        printf("create_descriptor_sets() failed.\n");
+        return result;
     }
 
     return result;
@@ -872,12 +821,34 @@ VkResult create_graphics_pipeline(VulkanRenderer* renderer) {
         .pDynamicStates = dynamic_states
     };
 
+    VkDescriptorSetLayoutBinding layout_binding = {
+        .binding = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = 1,
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .pImmutableSamplers = nullptr
+    };
+
+    VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .bindingCount = 1,
+        .pBindings = &layout_binding,
+    };
+
+    result = vkCreateDescriptorSetLayout(renderer->devices.logical.device, &descriptor_set_layout_create_info, nullptr, &renderer->graphics_pipeline.descriptor_set_layout);
+    if(result != VK_SUCCESS) {
+        printf("vkCreateDescriptorSetLayout() failed.\n");
+        return result;
+    }
+
     VkPipelineLayoutCreateInfo pipeline_layout_create_info = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .pNext = nullptr,
         .flags = 0,
-        .setLayoutCount = 0,
-        .pSetLayouts = nullptr,
+        .setLayoutCount = 1,
+        .pSetLayouts = &renderer->graphics_pipeline.descriptor_set_layout,
         .pushConstantRangeCount = 0,
         .pPushConstantRanges = nullptr
     };
@@ -1166,7 +1137,10 @@ VkResult record_command_buffer(VulkanRenderer* renderer, VkCommandBuffer command
     VkBuffer vertex_buffers[] = { renderer->graphics_pipeline.vertex_buffer.buffer };
     VkDeviceSize offsets[] = { 0 };
     vkCmdBindVertexBuffers(command_buffer, 0, 1, vertex_buffers, offsets);
-    vkCmdDraw(command_buffer, 9, 1, 0, 0);
+    vkCmdBindIndexBuffer(command_buffer, renderer->graphics_pipeline.index_buffer.buffer, 0, VkIndexType::VK_INDEX_TYPE_UINT16);
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer->graphics_pipeline.layout, 0, 1, &renderer->graphics_pipeline.descriptor_sets[renderer->swapchain.current_frame_index], 0, nullptr);
+    vkCmdDrawIndexed(command_buffer, 9, 1, 0, 0, 0);
+    //vkCmdDraw(command_buffer, 9, 1, 0, 0);\
 
     vkCmdEndRenderPass(command_buffer);
 
@@ -1206,6 +1180,8 @@ VkResult draw_frame(VulkanRenderer* renderer) {
         printf("vkAcquireNextImageKHR() failed.\n");
         return result;
     }
+
+    update_uniform_buffer(renderer, frame_index);
 
     result = vkResetFences(renderer->devices.logical.device, 1, &frame_in_flight_fence);
     if(result != VK_SUCCESS) {
@@ -1435,7 +1411,7 @@ VkResult create_buffer(VulkanRenderer* renderer, BufferAllocationInfo* buffer_al
     return result;
 }
 
-VkResult record_staging_command_buffer(VulkanRenderer* renderer, VkDeviceSize size) {
+VkResult record_staging_command_buffer(VulkanRenderer* renderer, Buffer* staging_buffer, Buffer* destination_buffer, VkDeviceSize size) {
     VkResult result = VK_ERROR_UNKNOWN;
 
     size_t command_pool_index = static_cast<size_t>(QueueFamilies::Type::TRANSFER);
@@ -1456,7 +1432,7 @@ VkResult record_staging_command_buffer(VulkanRenderer* renderer, VkDeviceSize si
         .size = size
     };
 
-    vkCmdCopyBuffer(command_buffer, renderer->graphics_pipeline.staging_buffer.buffer, renderer->graphics_pipeline.vertex_buffer.buffer, 1, &buffer_region);
+    vkCmdCopyBuffer(command_buffer, staging_buffer->buffer, destination_buffer->buffer, 1, &buffer_region);
 
     vkEndCommandBuffer(command_buffer);
 
@@ -1484,4 +1460,294 @@ void map_memory() {
     // memcpy(data, triangle_vertices, vertex_buffer_info.size);
 
     // vkUnmapMemory(renderer->devices.logical.device, renderer->graphics_pipeline.vertex_buffer.device_memory);
+}
+
+VkResult create_vertex_buffer(VulkanRenderer* renderer) {
+    VkResult result = VK_ERROR_UNKNOWN;
+
+    Buffer staging_buffer;
+    VkDeviceSize buffer_sizes = sizeof(Vertex) * 6;
+    u32 shared_buffer_queue_family_indices[] = {
+        static_cast<u32>(renderer->devices.queue_families.families[static_cast<u32>(QueueFamilies::Type::GRAPHICS)].index),
+        static_cast<u32>(renderer->devices.queue_families.families[static_cast<u32>(QueueFamilies::Type::TRANSFER)].index)
+    };
+
+    //Vertex Staging Buffer
+    {
+        BufferAllocationInfo staging_buffer_info = {
+            .buffer = &staging_buffer,
+            .usage_flags = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            .memory_properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            .size = buffer_sizes,
+            .sharing_mode = VK_SHARING_MODE_CONCURRENT,
+            .queue_families_indices_count = 2,
+            .queue_family_indices = shared_buffer_queue_family_indices
+        };
+
+        result = create_buffer(renderer, &staging_buffer_info);
+        if(result != VK_SUCCESS) {
+            printf("create_buffer() failed. [Staging Buffer]\n");
+            return result;
+        } else {
+            void* data;
+            result = vkMapMemory(renderer->devices.logical.device, staging_buffer.device_memory, 0, buffer_sizes, 0, &data);
+            if(result != VK_SUCCESS) {
+                printf("vkMapMemory() failed.\n");
+                return result;
+            }
+            memcpy_s(data, buffer_sizes, indexed_triforce_vertices, buffer_sizes);
+            vkUnmapMemory(renderer->devices.logical.device, staging_buffer.device_memory);
+        }
+    }
+
+    //Vertex Buffer
+    {
+        BufferAllocationInfo vertex_buffer_info = {
+            .buffer = &renderer->graphics_pipeline.vertex_buffer,
+            .usage_flags = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            .memory_properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            .size = buffer_sizes,
+            .sharing_mode = VK_SHARING_MODE_CONCURRENT,
+            .queue_families_indices_count = 2,
+            .queue_family_indices = shared_buffer_queue_family_indices
+        };
+
+        result = create_buffer(renderer, &vertex_buffer_info);
+        if(result != VK_SUCCESS) {
+            printf("create_buffer() failed. [Vertex Buffer]\n");
+            return result;
+        }
+    }
+
+    record_staging_command_buffer(renderer, &staging_buffer, &renderer->graphics_pipeline.vertex_buffer, buffer_sizes);
+
+    //Staging Queue Submit
+    {
+        VkSubmitInfo submit_info = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .pNext = nullptr,
+            .waitSemaphoreCount = 0,
+            .pWaitSemaphores = nullptr,
+            .pWaitDstStageMask = 0,
+            .commandBufferCount = 1,
+            .pCommandBuffers = renderer->devices.command_pools[static_cast<u32>(QueueFamilies::Type::TRANSFER)].command_buffers,
+            .signalSemaphoreCount = 0,
+            .pSignalSemaphores = nullptr
+        };
+
+        result = vkQueueSubmit(renderer->devices.queue_families.families[1].queues[0], 1, &submit_info, VK_NULL_HANDLE);
+        if(result != VK_SUCCESS) {
+            printf("VkQueueSubmit failed()\n");
+            return result;
+        }
+
+        result = vkQueueWaitIdle(renderer->devices.queue_families.families[1].queues[0]);
+        if(result != VK_SUCCESS) {
+            printf("vkQueueWaitIdle failed()\n");
+            return result;
+        }
+    }
+
+    return result;
+}
+
+VkResult create_index_buffer(VulkanRenderer* renderer) {
+    VkResult result = VK_ERROR_UNKNOWN;
+
+    Buffer staging_buffer;
+    size_t buffer_sizes = sizeof(u16) * 9;
+    u32 shared_buffer_queue_family_indices[] = {
+        static_cast<u32>(renderer->devices.queue_families.families[static_cast<u32>(QueueFamilies::Type::GRAPHICS)].index),
+        static_cast<u32>(renderer->devices.queue_families.families[static_cast<u32>(QueueFamilies::Type::TRANSFER)].index)
+    };
+
+    //Index Buffer
+    {
+        BufferAllocationInfo index_buffer_info = {
+            .buffer = &renderer->graphics_pipeline.index_buffer,
+            .usage_flags = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            .memory_properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            .size = buffer_sizes,
+            .sharing_mode = VK_SHARING_MODE_EXCLUSIVE
+        };
+
+        result = create_buffer(renderer, &index_buffer_info);
+        if(result != VK_SUCCESS) {
+            printf("create_buffer() failed. [Index Buffer]\n");
+            return result;
+        }
+    }
+
+    //Index Staging Buffer
+    {
+        BufferAllocationInfo staging_buffer_info = {
+            .buffer = &staging_buffer,
+            .usage_flags = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            .memory_properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            .size = buffer_sizes,
+            .sharing_mode = VK_SHARING_MODE_CONCURRENT,
+            .queue_families_indices_count = 2,
+            .queue_family_indices = shared_buffer_queue_family_indices
+        };
+
+        result = create_buffer(renderer, &staging_buffer_info);
+        if(result != VK_SUCCESS) {
+            printf("create_buffer() failed. [Staging Buffer]\n");
+            return result;
+        } else {
+            void* data;
+            result = vkMapMemory(renderer->devices.logical.device, staging_buffer.device_memory, 0, buffer_sizes, 0, &data);
+            if(result != VK_SUCCESS) {
+                printf("vkMapMemory() failed.\n");
+                return result;
+            }
+            memcpy_s(data, buffer_sizes, vertex_indices, buffer_sizes);
+            vkUnmapMemory(renderer->devices.logical.device, staging_buffer.device_memory);
+        }
+    }
+
+    record_staging_command_buffer(renderer, &staging_buffer, &renderer->graphics_pipeline.index_buffer, buffer_sizes);
+
+    //Staging Queue Submit
+    {
+        VkSubmitInfo submit_info = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .pNext = nullptr,
+            .waitSemaphoreCount = 0,
+            .pWaitSemaphores = nullptr,
+            .pWaitDstStageMask = 0,
+            .commandBufferCount = 1,
+            .pCommandBuffers = renderer->devices.command_pools[static_cast<u32>(QueueFamilies::Type::TRANSFER)].command_buffers,
+            .signalSemaphoreCount = 0,
+            .pSignalSemaphores = nullptr
+        };
+
+        result = vkQueueSubmit(renderer->devices.queue_families.families[1].queues[0], 1, &submit_info, VK_NULL_HANDLE);
+        if(result != VK_SUCCESS) {
+            printf("VkQueueSubmit failed()\n");
+            return result;
+        }
+
+        result = vkQueueWaitIdle(renderer->devices.queue_families.families[1].queues[0]);
+        if(result != VK_SUCCESS) {
+            printf("vkQueueWaitIdle failed()\n");
+            return result;
+        }
+    }
+
+    return result;
+}
+
+VkResult create_uniform_buffers(VulkanRenderer* renderer) {
+    VkResult result = VK_ERROR_UNKNOWN;
+
+    VkDeviceSize buffer_size = sizeof(UniformBufferObject);
+
+    for(size_t uniform_buffer_index = 0; uniform_buffer_index < Swapchain::MAX_FRAMES_IN_FLIGHT; ++uniform_buffer_index) {
+        BufferAllocationInfo uniform_buffer_allocation_info = {
+            .buffer = &renderer->graphics_pipeline.uniform_buffers[uniform_buffer_index],
+            .usage_flags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            .memory_properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            .size = buffer_size,
+            .sharing_mode = VK_SHARING_MODE_EXCLUSIVE
+        };
+
+        result = create_buffer(renderer, &uniform_buffer_allocation_info);
+        if(result != VK_SUCCESS) {
+            printf("create_buffer() failed. [Uniform Buffer]\n");
+            return result;
+        } else {
+            vkMapMemory(renderer->devices.logical.device, renderer->graphics_pipeline.uniform_buffers[uniform_buffer_index].device_memory, 0, buffer_size, 0, &renderer->graphics_pipeline.uniform_buffers[uniform_buffer_index].data);
+        }
+    }
+
+    return result;
+}
+
+VkResult update_uniform_buffer(VulkanRenderer* renderer, size_t image_index) {
+    VkResult result = VK_ERROR_UNKNOWN;
+
+    UniformBufferObject uniform_buffer_object = {
+        .model = MAT4_IDENTITY,
+        .view = MAT4_IDENTITY,
+        .projection = MAT4_IDENTITY
+    };
+
+    memcpy(renderer->graphics_pipeline.uniform_buffers[image_index].data, &uniform_buffer_object, sizeof(UniformBufferObject));
+
+    return result;
+}
+
+VkResult create_descriptor_pool(VulkanRenderer* renderer) {
+    VkResult result = VK_ERROR_UNKNOWN;
+
+    VkDescriptorPoolSize size = {
+        .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = static_cast<u32>(Swapchain::MAX_FRAMES_IN_FLIGHT)
+    };
+
+    VkDescriptorPoolCreateInfo create_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .maxSets = static_cast<u32>(Swapchain::MAX_FRAMES_IN_FLIGHT),
+        .poolSizeCount = 1,
+        .pPoolSizes = &size
+    };
+
+    result = vkCreateDescriptorPool(renderer->devices.logical.device, &create_info, nullptr, &renderer->graphics_pipeline.descriptor_pool);
+    if(result != VK_SUCCESS) {
+        printf("vkCreateDescriptorPool() failed.\n");
+        return result;
+    }
+
+    return result;
+}
+
+VkResult create_descriptor_sets(VulkanRenderer* renderer) {
+    VkResult result = VK_ERROR_UNKNOWN;
+
+    VkDescriptorSetLayout layouts[Swapchain::MAX_FRAMES_IN_FLIGHT];
+    for(size_t layout_index = 0; layout_index < Swapchain::MAX_FRAMES_IN_FLIGHT; ++layout_index) {
+        layouts[layout_index] = renderer->graphics_pipeline.descriptor_set_layout;
+    }
+
+    VkDescriptorSetAllocateInfo allocate_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .pNext = nullptr,
+        .descriptorPool = renderer->graphics_pipeline.descriptor_pool,
+        .descriptorSetCount = Swapchain::MAX_FRAMES_IN_FLIGHT,
+        .pSetLayouts = layouts
+    };
+
+    result = vkAllocateDescriptorSets(renderer->devices.logical.device, &allocate_info, renderer->graphics_pipeline.descriptor_sets);
+    if(result != VK_SUCCESS) {
+        printf("vkAllocateDescriptorSets() failed.\n");
+        return result;
+    }
+
+    for(size_t buffer_index = 0; buffer_index < Swapchain::MAX_FRAMES_IN_FLIGHT; ++buffer_index) {
+        VkDescriptorBufferInfo buffer_info = {
+            .buffer = renderer->graphics_pipeline.uniform_buffers[buffer_index].buffer,
+            .offset = 0,
+            .range = sizeof(UniformBufferObject)
+        };
+
+        VkWriteDescriptorSet write_descriptor_set = {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .pNext = nullptr,
+            .dstSet = renderer->graphics_pipeline.descriptor_sets[buffer_index],
+            .dstBinding = 0,
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .pImageInfo = nullptr,
+            .pBufferInfo = &buffer_info,
+            .pTexelBufferView = nullptr
+        };
+
+        vkUpdateDescriptorSets(renderer->devices.logical.device, 1, &write_descriptor_set, 0, nullptr);
+    }
+
+    return result;
 }

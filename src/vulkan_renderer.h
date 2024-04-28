@@ -9,18 +9,10 @@ struct Vertex {
     Vec3 color;
 };
 
-static constexpr Vertex triangle_vertices[] = {
-    { { -1.0f, 0.0f }, { 1.0f, 0.0f, 0.0f } },
-    { { -0.5f, -1.0f }, { 0.0f, 1.0f, 0.0f } },
-    { { 0.0f, 0.0f }, { 0.0f, 0.0f, 10.0f } },
-
-    { { 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f } },
-    { { 0.5f, -1.0f }, { 0.0f, 1.0f, 0.0f } },
-    { { 1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } },
-
-    { { -0.5f, 1.0f }, { 1.0f, 0.0f, 0.0f } },
-    { { 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f } },
-    { { 0.5f, 1.0f }, { 0.0f, 0.0f, 1.0f } },
+struct UniformBufferObject {
+    Mat4 model;
+    Mat4 view;
+    Mat4 projection;
 };
 
 static constexpr Vertex triforce_vertices[] = {
@@ -35,6 +27,30 @@ static constexpr Vertex triforce_vertices[] = {
     { { 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f } },
     { { 0.5f, 0.0f }, { 0.0f, 1.0f, 0.0f } },
     { { 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f } },
+};
+
+static constexpr Vertex indexed_triforce_vertices[] = {
+    { { -1.0f, 1.0f }, { 1.0f, 0.0f, 0.0f } },
+    { { -0.5f, 0.0f }, { 0.5f, 0.5f, 0.0f } },
+    { { 0.0f, 1.0f }, { 0.5f, 0.0f, 0.5f } },
+    { { 0.0f, -1.0f }, { 0.0f, 1.0f, 0.0f } },
+    { { 0.5f, 0.0f }, { 0.0f, 0.5f, 0.5f } },
+    { { 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f } },
+};
+
+static constexpr u16 vertex_indices[] = {
+    0, 1, 2, 1, 3, 4, 2, 4, 5
+};
+
+static constexpr Vertex quad_vertices[] = {
+    { { -0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
+    { { 0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f } },
+    { { 0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } },
+    { { -0.5f, 0.5f }, { 1.0f, 1.0f, 1.0f } }
+};
+
+static constexpr u16 quad_indices[] = {
+    0, 1, 2, 2, 3, 0
 };
 
 struct QueueFamily {
@@ -118,6 +134,7 @@ struct ShaderData {
 struct Buffer {
     VkBuffer buffer = VK_NULL_HANDLE;
     VkDeviceMemory device_memory = VK_NULL_HANDLE;
+    void* data = nullptr;
 };
 
 struct BufferAllocationInfo {
@@ -134,10 +151,14 @@ struct GraphicsPipeline {
     ShaderData shader_data = {};
     VkPipelineLayout layout = VK_NULL_HANDLE;
     VkPipeline pipeline = VK_NULL_HANDLE;
+    VkDescriptorSetLayout descriptor_set_layout;
+    VkDescriptorSet descriptor_sets[Swapchain::MAX_FRAMES_IN_FLIGHT];
     VkRenderPass render_pass = VK_NULL_HANDLE;
     VkClearValue clear_color = { .color = { 0.0f, 0.0f, 0.0f, 0.0f } };
     Buffer vertex_buffer = {};
-    Buffer staging_buffer = {};
+    Buffer index_buffer = {};
+    Buffer uniform_buffers[Swapchain::MAX_FRAMES_IN_FLIGHT];
+    VkDescriptorPool descriptor_pool;
 };
 
 struct Devices {
@@ -204,4 +225,13 @@ VkResult create_point_pipeline(VulkanRenderer* renderer);
 
 size_t get_queue_family_index(QueueFamilies::Type type);
 
-VkResult record_staging_command_buffer(VulkanRenderer* renderer, VkDeviceSize size);
+VkResult record_staging_command_buffer(VulkanRenderer* renderer, Buffer* buffer, VkDeviceSize size);
+
+VkResult create_vertex_buffer(VulkanRenderer* renderer);
+VkResult create_index_buffer(VulkanRenderer* renderer);
+VkResult create_uniform_buffers(VulkanRenderer* renderer);
+
+VkResult update_uniform_buffer(VulkanRenderer* renderer, size_t image_index);
+
+VkResult create_descriptor_pool(VulkanRenderer* renderer);
+VkResult create_descriptor_sets(VulkanRenderer* renderer);

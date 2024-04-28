@@ -20,6 +20,7 @@ namespace Resolutions {
 }
 
 struct WindowDescription {
-    const char* title = "";
+    static constexpr size_t MAX_WINDOW_TITLE_SIZE = 32;
+    char title[MAX_WINDOW_TITLE_SIZE];
     Resolution resolution = {};
 };

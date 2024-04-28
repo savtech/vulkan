@@ -32,3 +32,17 @@ struct Vec4 {
     f32 z = 0.0f;
     f32 w = 0.0f;
 };
+
+union Mat4 {
+    f32 data[16];
+    Vec4 rows[4];
+};
+
+// clang-format off
+static constexpr Mat4 MAT4_IDENTITY = {
+    1.0f, 0.0f, 0.0f, 0.0f,
+    0.0f, 1.0f, 0.0f, 0.0f,
+    0.0f, 0.0f, 1.0f, 0.0f,
+    0.0f, 0.0f, 0.0f, 1.0f
+};
+// clang-format on
