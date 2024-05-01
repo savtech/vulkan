@@ -2,7 +2,6 @@
 #include <stdio.h>
 #include <vector>
 #include "vulkan_renderer.h"
-#include "math.h"
 
 VkResult create_renderer(VulkanRendererInitInfo* vulkan_renderer_init_info) {
     VkResult result = VK_ERROR_UNKNOWN;
@@ -1153,7 +1152,7 @@ VkResult record_command_buffer(VulkanRenderer* renderer, VkCommandBuffer command
     return result;
 }
 
-VkResult draw_frame(VulkanRenderer* renderer) {
+VkResult draw_frame(VulkanRenderer* renderer, Time::Duration delta_time) {
     VkResult result = VK_ERROR_UNKNOWN;
 
     size_t frame_index = renderer->swapchain.current_frame_index;
@@ -1181,7 +1180,7 @@ VkResult draw_frame(VulkanRenderer* renderer) {
         return result;
     }
 
-    update_uniform_buffer(renderer, frame_index);
+    update_uniform_buffer(renderer, frame_index, delta_time);
 
     result = vkResetFences(renderer->devices.logical.device, 1, &frame_in_flight_fence);
     if(result != VK_SUCCESS) {
@@ -1664,12 +1663,50 @@ VkResult create_uniform_buffers(VulkanRenderer* renderer) {
     return result;
 }
 
-VkResult update_uniform_buffer(VulkanRenderer* renderer, size_t image_index) {
+VkResult update_uniform_buffer(VulkanRenderer* renderer, size_t image_index, Time::Duration delta_time) {
     VkResult result = VK_ERROR_UNKNOWN;
 
+    // clang-format off
+    Mat4 identity = {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f
+    };
+
+    Mat4 rotate_90 = {
+        0, 1, 0, 0,
+       -1, 0, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1
+    };
+
+    Mat4 scale_2 = {
+        2, 0, 0, 0,
+        0, 2, 0, 0,
+        0, 0, 2, 0,
+        0, 0, 0, 1
+    };
+
+    Mat4 scale_05 = {
+        0.5f, 0, 0, 0,
+        0, 0.5f, 0, 0,
+        0, 0, 0.5f, 0,
+        0, 0, 0, 1
+    }; 
+    
+    Mat4 view_transform = {
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0.3f, 1
+    };
+
+    // clang-format on
+
     UniformBufferObject uniform_buffer_object = {
-        .model = MAT4_IDENTITY,
-        .view = MAT4_IDENTITY,
+        .model = rotate_90,
+        .view = view_transform,
         .projection = MAT4_IDENTITY
     };
 

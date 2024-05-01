@@ -24,4 +24,4 @@ void window_create(WindowWin32* window);
 LRESULT window_callback(HWND handle, UINT message, WPARAM w_param, LPARAM l_param);
 void console_create();
 void application_update(ApplicationWin32Vulkan* application, Time::Duration delta_time);
-void application_render(ApplicationWin32Vulkan* application);
+void application_render(ApplicationWin32Vulkan* application, Time::Duration delta_time);

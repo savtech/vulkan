@@ -17,6 +17,30 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, LPSTR cmd_line, int sho
     window_create(&application.window);
     console_create();
 
+    Matrix<f32, 3, 3> matrix_a = {};
+    matrix_a[0][0] = 4;
+    matrix_a[0][1] = 2;
+    matrix_a[0][2] = 0;
+    matrix_a[1][0] = 0;
+    matrix_a[1][1] = 8;
+    matrix_a[1][2] = 1;
+    matrix_a[2][0] = 0;
+    matrix_a[2][1] = 1;
+    matrix_a[2][2] = 0;
+
+    Matrix<f32, 3, 3> matrix_b = {};
+    matrix_b[0][0] = 4;
+    matrix_b[0][1] = 2;
+    matrix_b[0][2] = 1;
+    matrix_b[1][0] = 2;
+    matrix_b[1][1] = 0;
+    matrix_b[1][2] = 4;
+    matrix_b[2][0] = 9;
+    matrix_b[2][1] = 4;
+    matrix_b[2][2] = 2;
+
+    auto matrix_c = matrix_a * matrix_b;
+
     VulkanRendererInitInfo vulkan_renderer_init_info = {
         .renderer = &application.renderer,
         .application_name = application.window.description.title,
@@ -73,7 +97,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, LPSTR cmd_line, int sho
                 accumulator -= delta_time;
             }
 
-            application_render(&application);
+            application_render(&application, delta_time);
         }
 
         vkDeviceWaitIdle(application.renderer.devices.logical.device);
@@ -204,7 +228,7 @@ void application_update(ApplicationWin32Vulkan* application, Time::Duration delt
     session_update(&application->session, delta_time);
 }
 
-void application_render(ApplicationWin32Vulkan* application) {
+void application_render(ApplicationWin32Vulkan* application, Time::Duration delta_time) {
     if(!application->renderer.resizing) {
         if(application->renderer.fixed_frame_mode) {
             if(--application->renderer.frames_to_render == 0) {
@@ -221,7 +245,7 @@ void application_render(ApplicationWin32Vulkan* application) {
             SetWindowTextA(application->window.handle, fps);
         }
 
-        VkResult result = draw_frame(&application->renderer);
+        VkResult result = draw_frame(&application->renderer, delta_time);
         if(result != VK_SUCCESS && result != VK_ERROR_OUT_OF_DATE_KHR) {
             printf("draw_frame() failed: %s\n", string_VkResult(result));
         }

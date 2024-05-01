@@ -3,6 +3,8 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_enum_string_helper.h>
 #include "types.h"
+#include "math.h"
+#include "time.h"
 
 struct Vertex {
     Vec2 position;
@@ -26,7 +28,7 @@ static constexpr Vertex triforce_vertices[] = {
 
     { { 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f } },
     { { 0.5f, 0.0f }, { 0.0f, 1.0f, 0.0f } },
-    { { 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f } },
+    { { 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f } }
 };
 
 static constexpr Vertex indexed_triforce_vertices[] = {
@@ -35,7 +37,7 @@ static constexpr Vertex indexed_triforce_vertices[] = {
     { { 0.0f, 1.0f }, { 0.5f, 0.0f, 0.5f } },
     { { 0.0f, -1.0f }, { 0.0f, 1.0f, 0.0f } },
     { { 0.5f, 0.0f }, { 0.0f, 0.5f, 0.5f } },
-    { { 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f } },
+    { { 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f } }
 };
 
 static constexpr u16 vertex_indices[] = {
@@ -214,7 +216,7 @@ VkResult create_frame_buffers(VulkanRenderer* renderer);
 VkResult create_command_pools(VulkanRenderer* renderer);
 VkResult allocate_command_buffers(VulkanRenderer* renderer, CommandBufferAllocationInfo* command_buffer_allocation_info);
 VkResult record_command_buffer(VulkanRenderer* renderer, VkCommandBuffer buffer, size_t image_index);
-VkResult draw_frame(VulkanRenderer* renderer);
+VkResult draw_frame(VulkanRenderer* renderer, Time::Duration delta_time);
 
 VkResult create_buffer(VulkanRenderer* renderer, BufferAllocationInfo* buffer_allocation_info);
 VkResult create_vertex_buffers(VulkanRenderer* renderer);
@@ -231,7 +233,7 @@ VkResult create_vertex_buffer(VulkanRenderer* renderer);
 VkResult create_index_buffer(VulkanRenderer* renderer);
 VkResult create_uniform_buffers(VulkanRenderer* renderer);
 
-VkResult update_uniform_buffer(VulkanRenderer* renderer, size_t image_index);
+VkResult update_uniform_buffer(VulkanRenderer* renderer, size_t image_index, Time::Duration delta_time);
 
 VkResult create_descriptor_pool(VulkanRenderer* renderer);
 VkResult create_descriptor_sets(VulkanRenderer* renderer);
