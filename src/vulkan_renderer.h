@@ -4,6 +4,7 @@
 #include <vulkan/vk_enum_string_helper.h>
 #include "types.h"
 #include "math.h"
+#include "memory.h"
 #include "time.h"
 
 struct Vertex {
@@ -69,16 +70,21 @@ struct QueueFamilies {
         TRANSFER,
         COUNT
     };
-    size_t count = 0;
-    QueueFamily* families = nullptr;
+
+    static constexpr size_t MAX_QUEUE_FAMILIES = static_cast<size_t>(QueueFamilies::Type::COUNT);
+
+    QueueFamily families[MAX_QUEUE_FAMILIES];
     u32 populated_families;
 };
 
 struct Synchronization {
+    static constexpr size_t MAX_SEMAPHORES = 8;
+    static constexpr size_t MAX_FENCES = 8;
+
     size_t semaphore_count = 0;
-    VkSemaphore* semaphores = VK_NULL_HANDLE;
+    VkSemaphore semaphores[MAX_SEMAPHORES];
     size_t fence_count = 0;
-    VkFence* fences = VK_NULL_HANDLE;
+    VkFence fences[MAX_FENCES];
 };
 
 struct CommandPool {
@@ -96,6 +102,7 @@ struct CommandBufferAllocationInfo {
 };
 
 struct Swapchain {
+    static constexpr size_t MIN_IMAGES = 3;
     static constexpr size_t MAX_FRAMES_IN_FLIGHT = 2;
 
     struct SupportInfo {
@@ -106,9 +113,9 @@ struct Swapchain {
 
     struct Images {
         size_t count = 0;
-        VkImage* images = VK_NULL_HANDLE;
-        VkImageView* views = VK_NULL_HANDLE;
-        VkFramebuffer* frame_buffers = VK_NULL_HANDLE;
+        VkImage* images = nullptr;
+        VkImageView* views = nullptr;
+        VkFramebuffer* frame_buffers = nullptr;
     };
 
     SupportInfo support_info = {};
@@ -176,8 +183,6 @@ struct Devices {
 
     Physical physical;
     Logical logical;
-    QueueFamilies queue_families = {};
-    CommandPool* command_pools = nullptr;
 };
 
 struct VulkanRenderer {
@@ -187,11 +192,15 @@ struct VulkanRenderer {
     Swapchain swapchain = {};
     GraphicsPipeline graphics_pipeline = {};
     GraphicsPipeline point_pipeline = {};
+    QueueFamilies queue_families = {};
+    CommandPool command_pools[QueueFamilies::MAX_QUEUE_FAMILIES];
 
     bool resizing = false;
     bool should_render = true;
     bool fixed_frame_mode = false;
     size_t frames_to_render = 10;
+
+    MemoryArena* heap_data;
 };
 
 struct VulkanRendererInitInfo {
@@ -225,7 +234,7 @@ VkResult resize(VulkanRenderer* renderer);
 
 VkResult create_point_pipeline(VulkanRenderer* renderer);
 
-size_t get_queue_family_index(QueueFamilies::Type type);
+size_t get_queue_family_index(VulkanRenderer* renderer, QueueFamilies::Type type);
 
 VkResult record_staging_command_buffer(VulkanRenderer* renderer, Buffer* buffer, VkDeviceSize size);
 

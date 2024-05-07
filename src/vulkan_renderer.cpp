@@ -3,10 +3,13 @@
 #include <vector>
 #include "vulkan_renderer.h"
 
+static MemoryArena* temporary_memory = memory_arena_create(MB(100));
+
 VkResult create_renderer(VulkanRendererInitInfo* vulkan_renderer_init_info) {
     VkResult result = VK_ERROR_UNKNOWN;
 
     VulkanRenderer* renderer = vulkan_renderer_init_info->renderer;
+    renderer->heap_data = memory_arena_create(MB(100));
 
     //BIG DOG memory leak incoming if we don't create some type of struct (RendererLoadData?) to keep track of meta data that can be mapped to the allocations we've made.
     //For example: RendererLoadData.swapchain_image_count (this is a bad example because we can query most of our structs for count information already. However, we are missing certain information, like the actual allocations within nested loops)
@@ -40,10 +43,10 @@ VkResult create_renderer(VulkanRendererInitInfo* vulkan_renderer_init_info) {
     result = query_queue_families(renderer);
     if(result != VK_SUCCESS) {
         printf("query_queue_families() failed.\n");
-        for(size_t queue_family_index = 0; queue_family_index < renderer->devices.queue_families.count; ++queue_family_index) {
-            free(renderer->devices.queue_families.families[queue_family_index].priorities);
+        for(size_t queue_family_index = 0; queue_family_index < QueueFamilies::MAX_QUEUE_FAMILIES; ++queue_family_index) {
+            //free(renderer->queue_families.families[queue_family_index].priorities);
         }
-        free(renderer->devices.queue_families.families);
+        //free(renderer->queue_families.families);
         return result;
     }
 
@@ -221,7 +224,7 @@ VkResult choose_physical_device(VulkanRenderer* renderer) {
         return result;
     }
 
-    VkPhysicalDevice* physical_devices = (VkPhysicalDevice*)malloc(sizeof(VkPhysicalDevice) * device_count);
+    VkPhysicalDevice* physical_devices = (VkPhysicalDevice*)memory_arena_allocate(temporary_memory, sizeof(VkPhysicalDevice) * device_count);
     result = vkEnumeratePhysicalDevices(renderer->instance, reinterpret_cast<u32*>(&device_count), physical_devices);
     if(result != VK_SUCCESS) {
         printf("vkEnumeratePhysicalDevices() failed.\n");
@@ -236,7 +239,7 @@ VkResult choose_physical_device(VulkanRenderer* renderer) {
         printf("Found Device: %s\n", renderer->devices.physical.properties.deviceName);
     }
 
-    free(physical_devices);
+    //free(physical_devices);
     return result;
 }
 
@@ -246,10 +249,9 @@ VkResult query_queue_families(VulkanRenderer* renderer) {
     size_t queue_family_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(renderer->devices.physical.device, reinterpret_cast<u32*>(&queue_family_count), nullptr);
 
-    VkQueueFamilyProperties* queue_family_properties_list = (VkQueueFamilyProperties*)malloc(sizeof(VkQueueFamilyProperties) * queue_family_count);
+    VkQueueFamilyProperties* queue_family_properties_list = (VkQueueFamilyProperties*)memory_arena_allocate(temporary_memory, sizeof(VkQueueFamilyProperties) * queue_family_count);
     vkGetPhysicalDeviceQueueFamilyProperties(renderer->devices.physical.device, reinterpret_cast<u32*>(&queue_family_count), queue_family_properties_list);
 
-    renderer->devices.queue_families.families = (QueueFamily*)malloc(sizeof(QueueFamily) * queue_family_count);
     for(size_t queue_family_index = 0; queue_family_index < queue_family_count; ++queue_family_index) {
         QueueFamily queue_family = {
             .index = queue_family_index,
@@ -264,27 +266,25 @@ VkResult query_queue_families(VulkanRenderer* renderer) {
         size_t graphics_index = static_cast<size_t>(QueueFamilies::Type::GRAPHICS);
         size_t transfer_index = static_cast<size_t>(QueueFamilies::Type::TRANSFER);
         if((queue_family_properties_list[queue_family_index].queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
-           !(renderer->devices.queue_families.populated_families & (1 << graphics_index))) {
+           !(renderer->queue_families.populated_families & (1 << graphics_index))) {
             result = vkGetPhysicalDeviceSurfaceSupportKHR(renderer->devices.physical.device, static_cast<u32>(queue_family_index), renderer->surface, &queue_family.surface_support);
             if(result != VK_SUCCESS) {
                 printf("vkGetPhysicalDeviceSurfaceSupportKHR() failed.\n");
-                free(queue_family_properties_list);
+                //free(queue_family_properties_list);
                 return result;
             }
 
-            renderer->devices.queue_families.families[graphics_index] = queue_family;
-            renderer->devices.queue_families.populated_families |= (1 << graphics_index);
-        } else if(((queue_family_properties_list[queue_family_index].queueFlags & (VK_QUEUE_TRANSFER_BIT | VK_QUEUE_GRAPHICS_BIT)) == VK_QUEUE_TRANSFER_BIT) && !(renderer->devices.queue_families.populated_families & (1 << transfer_index))) {
-            renderer->devices.queue_families.families[transfer_index] = queue_family;
-            renderer->devices.queue_families.populated_families |= (1 << transfer_index);
+            renderer->queue_families.families[graphics_index] = queue_family;
+            renderer->queue_families.populated_families |= (1 << graphics_index);
+        } else if(((queue_family_properties_list[queue_family_index].queueFlags & (VK_QUEUE_TRANSFER_BIT | VK_QUEUE_GRAPHICS_BIT)) == VK_QUEUE_TRANSFER_BIT) && !(renderer->queue_families.populated_families & (1 << transfer_index))) {
+            renderer->queue_families.families[transfer_index] = queue_family;
+            renderer->queue_families.populated_families |= (1 << transfer_index);
         } else {
             continue;
         }
-
-        ++renderer->devices.queue_families.count;
     }
 
-    free(queue_family_properties_list);
+    //free(queue_family_properties_list);
     return result;
 }
 
@@ -293,22 +293,22 @@ VkResult create_logical_device(VulkanRenderer* renderer) {
 
     std::vector<const char*> device_extensions = {};
 
-    VkDeviceQueueCreateInfo* queue_create_infos = (VkDeviceQueueCreateInfo*)malloc(sizeof(VkDeviceQueueCreateInfo) * renderer->devices.queue_families.count);
-    for(size_t queue_family_index = 0; queue_family_index < renderer->devices.queue_families.count; ++queue_family_index) {
+    VkDeviceQueueCreateInfo* queue_create_infos = (VkDeviceQueueCreateInfo*)memory_arena_allocate(temporary_memory, sizeof(VkDeviceQueueCreateInfo) * QueueFamilies::MAX_QUEUE_FAMILIES);
+    for(size_t queue_family_index = 0; queue_family_index < QueueFamilies::MAX_QUEUE_FAMILIES; ++queue_family_index) {
         queue_create_infos[queue_family_index] = {
             .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
             .pNext = nullptr,
             .flags = 0,
-            .queueFamilyIndex = static_cast<u32>(renderer->devices.queue_families.families[queue_family_index].index),
-            .queueCount = renderer->devices.queue_families.families[queue_family_index].properties.queueCount,
-            .pQueuePriorities = renderer->devices.queue_families.families[queue_family_index].priorities
+            .queueFamilyIndex = static_cast<u32>(renderer->queue_families.families[queue_family_index].index),
+            .queueCount = renderer->queue_families.families[queue_family_index].properties.queueCount,
+            .pQueuePriorities = renderer->queue_families.families[queue_family_index].priorities
         };
     }
 
     size_t extension_properties_count = 0;
     vkEnumerateDeviceExtensionProperties(renderer->devices.physical.device, nullptr, reinterpret_cast<u32*>(&extension_properties_count), nullptr);
 
-    VkExtensionProperties* extension_properties = (VkExtensionProperties*)malloc(sizeof(VkExtensionProperties) * extension_properties_count);
+    VkExtensionProperties* extension_properties = (VkExtensionProperties*)memory_arena_allocate(temporary_memory, sizeof(VkExtensionProperties) * extension_properties_count);
     vkEnumerateDeviceExtensionProperties(renderer->devices.physical.device, nullptr, reinterpret_cast<u32*>(&extension_properties_count), extension_properties);
 
     for(size_t extension_index = 0; extension_index < extension_properties_count; ++extension_index) {
@@ -341,7 +341,7 @@ VkResult create_logical_device(VulkanRenderer* renderer) {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pNext = &physical_device_features,
         .flags = 0,
-        .queueCreateInfoCount = static_cast<u32>(renderer->devices.queue_families.count),
+        .queueCreateInfoCount = QueueFamilies::MAX_QUEUE_FAMILIES,
         .pQueueCreateInfos = queue_create_infos,
         .enabledLayerCount = 0,
         .ppEnabledLayerNames = nullptr,
@@ -353,20 +353,20 @@ VkResult create_logical_device(VulkanRenderer* renderer) {
     result = vkCreateDevice(renderer->devices.physical.device, &device_create_info, nullptr, &renderer->devices.logical.device);
     if(result != VK_SUCCESS) {
         printf("vkCreateDevice() failed.\n");
-        free(extension_properties);
-        free(queue_create_infos);
+        //free(extension_properties);
+        //free(queue_create_infos);
         return result;
     }
 
-    for(size_t queue_family_index = 0; queue_family_index < renderer->devices.queue_families.count; ++queue_family_index) {
-        renderer->devices.queue_families.families[queue_family_index].queues = (VkQueue*)malloc(sizeof(VkQueue) * renderer->devices.queue_families.families[queue_family_index].properties.queueCount);
-        for(size_t queue_index = 0; queue_index < renderer->devices.queue_families.families[queue_family_index].properties.queueCount; ++queue_index) {
-            vkGetDeviceQueue(renderer->devices.logical.device, static_cast<u32>(renderer->devices.queue_families.families[queue_family_index].index), static_cast<u32>(queue_index), &renderer->devices.queue_families.families[queue_family_index].queues[queue_index]);
+    for(size_t queue_family_index = 0; queue_family_index < QueueFamilies::MAX_QUEUE_FAMILIES; ++queue_family_index) {
+        renderer->queue_families.families[queue_family_index].queues = (VkQueue*)malloc(sizeof(VkQueue) * renderer->queue_families.families[queue_family_index].properties.queueCount);
+        for(size_t queue_index = 0; queue_index < renderer->queue_families.families[queue_family_index].properties.queueCount; ++queue_index) {
+            vkGetDeviceQueue(renderer->devices.logical.device, static_cast<u32>(renderer->queue_families.families[queue_family_index].index), static_cast<u32>(queue_index), &renderer->queue_families.families[queue_family_index].queues[queue_index]);
         }
     }
 
-    free(extension_properties);
-    free(queue_create_infos);
+    //free(extension_properties);
+    //free(queue_create_infos);
     return result;
 }
 
@@ -390,7 +390,7 @@ VkResult query_swapchain_support(VulkanRenderer* renderer) {
     result = vkGetPhysicalDeviceSurfaceFormatsKHR(renderer->devices.physical.device, renderer->surface, reinterpret_cast<u32*>(&surface_format_count), renderer->swapchain.support_info.surface_formats);
     if(result != VK_SUCCESS) {
         printf("vkGetPhysicalDeviceSurfaceFormatsKHR() failed.\n");
-        free(renderer->swapchain.support_info.surface_formats);
+        //free(renderer->swapchain.support_info.surface_formats);
         return result;
     }
 
@@ -407,7 +407,7 @@ VkResult query_swapchain_support(VulkanRenderer* renderer) {
     result = vkGetPhysicalDeviceSurfacePresentModesKHR(renderer->devices.physical.device, renderer->surface, reinterpret_cast<u32*>(&present_mode_count), nullptr);
     if(result != VK_SUCCESS) {
         printf("vkGetPhysicalDeviceSurfacePresentModesKHR() failed.\n");
-        free(renderer->swapchain.support_info.surface_formats);
+        //free(renderer->swapchain.support_info.surface_formats);
         return result;
     }
 
@@ -415,8 +415,8 @@ VkResult query_swapchain_support(VulkanRenderer* renderer) {
     result = vkGetPhysicalDeviceSurfacePresentModesKHR(renderer->devices.physical.device, renderer->surface, reinterpret_cast<u32*>(&present_mode_count), renderer->swapchain.support_info.present_modes);
     if(result != VK_SUCCESS) {
         printf("vkGetPhysicalDeviceSurfacePresentModesKHR() failed.\n");
-        free(renderer->swapchain.support_info.surface_formats);
-        free(renderer->swapchain.support_info.present_modes);
+        //free(renderer->swapchain.support_info.surface_formats);
+        //free(renderer->swapchain.support_info.present_modes);
         return result;
     }
 
@@ -475,15 +475,17 @@ VkResult create_swapchain(VulkanRenderer* renderer) {
         //printf("Swapchain allocated %zd images\n", renderer->swapchain.images.count);
     }
 
-    renderer->swapchain.images.images = (VkImage*)malloc(sizeof(VkImage) * renderer->swapchain.images.count);
+    //renderer->swapchain.images.images = (VkImage*)malloc(sizeof(VkImage) * renderer->swapchain.images.count);
+    renderer->swapchain.images.images = (VkImage*)memory_arena_allocate(renderer->heap_data, sizeof(VkImage) * renderer->swapchain.images.count);
     result = vkGetSwapchainImagesKHR(renderer->devices.logical.device, renderer->swapchain.swapchain, reinterpret_cast<u32*>(&renderer->swapchain.images.count), renderer->swapchain.images.images);
     if(result != VK_SUCCESS) {
         printf("vkGetSwapchainImagesKHR() failed.\n");
-        free(renderer->swapchain.images.images);
+        //free(renderer->swapchain.images.images);
         return result;
     }
 
-    renderer->swapchain.images.views = (VkImageView*)malloc(sizeof(VkImageView) * renderer->swapchain.images.count);
+    //renderer->swapchain.images.views = (VkImageView*)malloc(sizeof(VkImageView) * renderer->swapchain.images.count);
+    renderer->swapchain.images.views = (VkImageView*)memory_arena_allocate(renderer->heap_data, sizeof(VkImageView) * renderer->swapchain.images.count);
     for(size_t image_index = 0; image_index < renderer->swapchain.images.count; ++image_index) {
         VkImageViewCreateInfo image_view_create_info = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -503,8 +505,8 @@ VkResult create_swapchain(VulkanRenderer* renderer) {
         result = vkCreateImageView(renderer->devices.logical.device, &image_view_create_info, nullptr, &renderer->swapchain.images.views[image_index]);
         if(result != VK_SUCCESS) {
             printf("vkCreateImageView() failed. Image View[%zd]\n", image_index);
-            free(renderer->swapchain.images.images);
-            free(renderer->swapchain.images.views);
+            //free(renderer->swapchain.images.images);
+            //free(renderer->swapchain.images.views);
             return result;
         }
     }
@@ -635,7 +637,7 @@ VkResult create_graphics_pipeline(VulkanRenderer* renderer) {
         return result;
     }
 
-    VkPipelineShaderStageCreateInfo* pipeline_shader_stage_create_infos = (VkPipelineShaderStageCreateInfo*)malloc(sizeof(VkPipelineShaderStageCreateInfo) * renderer->graphics_pipeline.shader_data.count);
+    VkPipelineShaderStageCreateInfo* pipeline_shader_stage_create_infos = (VkPipelineShaderStageCreateInfo*)memory_arena_allocate(temporary_memory, sizeof(VkPipelineShaderStageCreateInfo) * renderer->graphics_pipeline.shader_data.count);
     for(size_t shader_index = 0; shader_index < renderer->graphics_pipeline.shader_data.count; ++shader_index) {
         pipeline_shader_stage_create_infos[shader_index] = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -974,7 +976,7 @@ VkResult create_frame_buffers(VulkanRenderer* renderer) {
         result = vkCreateFramebuffer(renderer->devices.logical.device, &frame_buffer_create_info, nullptr, &renderer->swapchain.images.frame_buffers[image_index]);
         if(result != VK_SUCCESS) {
             printf("vkCreateFramebuffer() failed. Frame Buffer[%zd]\n", image_index);
-            free(renderer->swapchain.images.frame_buffers);
+            //free(renderer->swapchain.images.frame_buffers);
             return result;
         }
     }
@@ -985,23 +987,20 @@ VkResult create_frame_buffers(VulkanRenderer* renderer) {
 VkResult create_command_pools(VulkanRenderer* renderer) {
     VkResult result = VK_ERROR_UNKNOWN;
 
-    size_t command_pool_count = static_cast<size_t>(QueueFamilies::Type::COUNT);
-
-    renderer->devices.command_pools = (CommandPool*)malloc(sizeof(CommandPool) * command_pool_count);
-    for(size_t command_pool_index = 0; command_pool_index < command_pool_count; ++command_pool_index) {
+    for(size_t command_pool_index = 0; command_pool_index < QueueFamilies::MAX_QUEUE_FAMILIES; ++command_pool_index) {
         VkCommandPoolCreateInfo command_pool_create_info = {
             .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
             .pNext = nullptr,
             .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
             //The following can maybe be a function call with a signature like: size_t get_queue_family_index(QueueFamilies::Type type) and we'll keep track of specific indices
             //for graphics, compute, etc. families in some array in the QueueFamilies struct. This will always return index 0 as we only have the GRAPHICS type in the enum currently
-            .queueFamilyIndex = static_cast<u32>(renderer->devices.queue_families.families[command_pool_index].index)
+            .queueFamilyIndex = static_cast<u32>(renderer->queue_families.families[command_pool_index].index)
         };
 
-        result = vkCreateCommandPool(renderer->devices.logical.device, &command_pool_create_info, nullptr, &renderer->devices.command_pools[command_pool_index].pool);
+        result = vkCreateCommandPool(renderer->devices.logical.device, &command_pool_create_info, nullptr, &renderer->command_pools[command_pool_index].pool);
         if(result != VK_SUCCESS) {
             printf("vkCreateCommandPool failed. Command Pool[%zd]\n", command_pool_index);
-            free(renderer->devices.command_pools);
+            //free(renderer->command_pools);
             return result;
         }
     }
@@ -1015,25 +1014,25 @@ VkResult allocate_command_buffers(VulkanRenderer* renderer, CommandBufferAllocat
     //The following can maybe be a function call with a signature like: size_t get_queue_family_index(QueueFamilies::Type type) and we'll keep track of specific indices
     //for graphics, compute, etc. families in some array in the QueueFamilies struct.
     size_t pool_type_index = static_cast<size_t>(command_buffer_allocation_info->pool_type);
-    size_t command_pool_index = renderer->devices.queue_families.families[pool_type_index].index;
+    size_t command_pool_index = renderer->queue_families.families[pool_type_index].index;
 
-    renderer->devices.command_pools[command_pool_index].command_buffers = (VkCommandBuffer*)malloc(sizeof(VkCommandBuffer) * command_buffer_allocation_info->buffer_count);
-    renderer->devices.command_pools[command_pool_index].synchro = (Synchronization*)malloc(sizeof(Synchronization) * command_buffer_allocation_info->buffer_count);
-    renderer->devices.command_pools[command_pool_index].buffer_count = command_buffer_allocation_info->buffer_count;
+    renderer->command_pools[command_pool_index].command_buffers = (VkCommandBuffer*)malloc(sizeof(VkCommandBuffer) * command_buffer_allocation_info->buffer_count);
+    renderer->command_pools[command_pool_index].synchro = (Synchronization*)malloc(sizeof(Synchronization) * command_buffer_allocation_info->buffer_count);
+    renderer->command_pools[command_pool_index].buffer_count = command_buffer_allocation_info->buffer_count;
 
     VkCommandBufferAllocateInfo command_buffer_allocate_info = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .pNext = nullptr,
-        .commandPool = renderer->devices.command_pools[command_pool_index].pool,
+        .commandPool = renderer->command_pools[command_pool_index].pool,
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = static_cast<u32>(command_buffer_allocation_info->buffer_count)
     };
 
-    result = vkAllocateCommandBuffers(renderer->devices.logical.device, &command_buffer_allocate_info, renderer->devices.command_pools[command_pool_index].command_buffers);
+    result = vkAllocateCommandBuffers(renderer->devices.logical.device, &command_buffer_allocate_info, renderer->command_pools[command_pool_index].command_buffers);
     if(result == VK_SUCCESS) {
         for(size_t command_buffer_index = 0; command_buffer_index < command_buffer_allocation_info->buffer_count; ++command_buffer_index) {
             if(command_buffer_allocation_info->semaphore_count != NULL) {
-                renderer->devices.command_pools->synchro[command_buffer_index].semaphores = (VkSemaphore*)malloc(sizeof(VkSemaphore) * command_buffer_allocation_info->semaphore_count[command_buffer_index]);
+                //renderer->command_pools->synchro[command_buffer_index].semaphores = (VkSemaphore*)malloc(sizeof(VkSemaphore) * command_buffer_allocation_info->semaphore_count[command_buffer_index]);
 
                 VkSemaphoreCreateInfo semaphore_create_info = {
                     .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
@@ -1042,20 +1041,20 @@ VkResult allocate_command_buffers(VulkanRenderer* renderer, CommandBufferAllocat
                 };
 
                 for(size_t semaphore_index = 0; semaphore_index < command_buffer_allocation_info->semaphore_count[command_buffer_index]; ++semaphore_index) {
-                    result = vkCreateSemaphore(renderer->devices.logical.device, &semaphore_create_info, nullptr, &renderer->devices.command_pools[command_pool_index].synchro[command_buffer_index].semaphores[semaphore_index]);
+                    result = vkCreateSemaphore(renderer->devices.logical.device, &semaphore_create_info, nullptr, &renderer->command_pools[command_pool_index].synchro[command_buffer_index].semaphores[semaphore_index]);
                     if(result == VK_SUCCESS) {
-                        renderer->devices.command_pools[command_pool_index].synchro->semaphore_count++;
+                        renderer->command_pools[command_pool_index].synchro->semaphore_count++;
                     } else {
                         printf("vkCreateSemaphore() failed. [Semaphore Index: %zd]\n", semaphore_index);
                         return result;
                     }
                 }
             } else {
-                renderer->devices.command_pools[command_pool_index].synchro->semaphore_count = 0;
+                renderer->command_pools[command_pool_index].synchro->semaphore_count = 0;
             }
 
             if(command_buffer_allocation_info->fence_count != NULL) {
-                renderer->devices.command_pools->synchro[command_buffer_index].fences = (VkFence*)malloc(sizeof(VkFence) * command_buffer_allocation_info->fence_count[command_buffer_index]);
+                //renderer->command_pools->synchro[command_buffer_index].fences = (VkFence*)malloc(sizeof(VkFence) * command_buffer_allocation_info->fence_count[command_buffer_index]);
 
                 VkFenceCreateInfo fence_create_info = {
                     .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
@@ -1064,16 +1063,16 @@ VkResult allocate_command_buffers(VulkanRenderer* renderer, CommandBufferAllocat
                 };
 
                 for(size_t fence_index = 0; fence_index < command_buffer_allocation_info->fence_count[command_buffer_index]; ++fence_index) {
-                    result = vkCreateFence(renderer->devices.logical.device, &fence_create_info, nullptr, &renderer->devices.command_pools[command_pool_index].synchro[command_buffer_index].fences[fence_index]);
+                    result = vkCreateFence(renderer->devices.logical.device, &fence_create_info, nullptr, &renderer->command_pools[command_pool_index].synchro[command_buffer_index].fences[fence_index]);
                     if(result == VK_SUCCESS) {
-                        renderer->devices.command_pools[command_pool_index].synchro->fence_count++;
+                        renderer->command_pools[command_pool_index].synchro->fence_count++;
                     } else {
                         printf("vkCreateFence() failed. [Fence Index: %zd]\n", fence_index);
                         return result;
                     }
                 }
             } else {
-                renderer->devices.command_pools[command_pool_index].synchro->fence_count = 0;
+                renderer->command_pools[command_pool_index].synchro->fence_count = 0;
             }
         }
     } else {
@@ -1157,7 +1156,7 @@ VkResult draw_frame(VulkanRenderer* renderer, Time::Duration delta_time) {
 
     size_t frame_index = renderer->swapchain.current_frame_index;
     size_t command_pool_index = static_cast<size_t>(QueueFamilies::Type::GRAPHICS);
-    CommandPool* command_pool = &renderer->devices.command_pools[command_pool_index];
+    CommandPool* command_pool = &renderer->command_pools[command_pool_index];
 
     VkFence frame_in_flight_fence = command_pool->synchro[frame_index].fences[0];
     result = vkWaitForFences(renderer->devices.logical.device, 1, &frame_in_flight_fence, VK_TRUE, UINT64_MAX);
@@ -1218,7 +1217,7 @@ VkResult draw_frame(VulkanRenderer* renderer, Time::Duration delta_time) {
     };
 
     //Another spot that we can make use of the get_queue_family_index(QueueFamilies::Type type) function
-    VkQueue queue = renderer->devices.queue_families.families[0].queues[0];
+    VkQueue queue = renderer->queue_families.families[0].queues[0];
     result = vkQueueSubmit(queue, 1, &submit_info, frame_in_flight_fence);
     if(result != VK_SUCCESS) {
         printf("vkQueueSubmit() failed.\n");
@@ -1295,7 +1294,7 @@ VkResult create_point_pipeline(VulkanRenderer* renderer) {
         return result;
     }
 
-    VkPipelineShaderStageCreateInfo* shader_stage_create_infos = (VkPipelineShaderStageCreateInfo*)malloc(sizeof(VkPipelineShaderStageCreateInfo) * shader_count);
+    VkPipelineShaderStageCreateInfo* shader_stage_create_infos = (VkPipelineShaderStageCreateInfo*)memory_arena_allocate(temporary_memory, sizeof(VkPipelineShaderStageCreateInfo) * shader_count);
     for(size_t shader_index = 0; shader_index < shader_count; ++shader_index) {
         shader_stage_create_infos[shader_index] = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -1414,7 +1413,7 @@ VkResult record_staging_command_buffer(VulkanRenderer* renderer, Buffer* staging
     VkResult result = VK_ERROR_UNKNOWN;
 
     size_t command_pool_index = static_cast<size_t>(QueueFamilies::Type::TRANSFER);
-    VkCommandBuffer command_buffer = renderer->devices.command_pools[command_pool_index].command_buffers[0];
+    VkCommandBuffer command_buffer = renderer->command_pools[command_pool_index].command_buffers[0];
 
     VkCommandBufferBeginInfo command_buffer_begin_info = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -1438,8 +1437,9 @@ VkResult record_staging_command_buffer(VulkanRenderer* renderer, Buffer* staging
     return result;
 }
 
-size_t get_queue_family_index(QueueFamilies::Type type) {
-    return 0;
+size_t get_queue_family_index(VulkanRenderer* renderer, QueueFamilies::Type type) {
+    size_t index = static_cast<size_t>(type);
+    return renderer->queue_families.families[index].index;
 }
 
 void map_memory() {
@@ -1467,8 +1467,8 @@ VkResult create_vertex_buffer(VulkanRenderer* renderer) {
     Buffer staging_buffer;
     VkDeviceSize buffer_sizes = sizeof(Vertex) * 6;
     u32 shared_buffer_queue_family_indices[] = {
-        static_cast<u32>(renderer->devices.queue_families.families[static_cast<u32>(QueueFamilies::Type::GRAPHICS)].index),
-        static_cast<u32>(renderer->devices.queue_families.families[static_cast<u32>(QueueFamilies::Type::TRANSFER)].index)
+        static_cast<u32>(renderer->queue_families.families[static_cast<u32>(QueueFamilies::Type::GRAPHICS)].index),
+        static_cast<u32>(renderer->queue_families.families[static_cast<u32>(QueueFamilies::Type::TRANSFER)].index)
     };
 
     //Vertex Staging Buffer
@@ -1529,18 +1529,18 @@ VkResult create_vertex_buffer(VulkanRenderer* renderer) {
             .pWaitSemaphores = nullptr,
             .pWaitDstStageMask = 0,
             .commandBufferCount = 1,
-            .pCommandBuffers = renderer->devices.command_pools[static_cast<u32>(QueueFamilies::Type::TRANSFER)].command_buffers,
+            .pCommandBuffers = renderer->command_pools[static_cast<u32>(QueueFamilies::Type::TRANSFER)].command_buffers,
             .signalSemaphoreCount = 0,
             .pSignalSemaphores = nullptr
         };
 
-        result = vkQueueSubmit(renderer->devices.queue_families.families[1].queues[0], 1, &submit_info, VK_NULL_HANDLE);
+        result = vkQueueSubmit(renderer->queue_families.families[1].queues[0], 1, &submit_info, VK_NULL_HANDLE);
         if(result != VK_SUCCESS) {
             printf("VkQueueSubmit failed()\n");
             return result;
         }
 
-        result = vkQueueWaitIdle(renderer->devices.queue_families.families[1].queues[0]);
+        result = vkQueueWaitIdle(renderer->queue_families.families[1].queues[0]);
         if(result != VK_SUCCESS) {
             printf("vkQueueWaitIdle failed()\n");
             return result;
@@ -1556,8 +1556,8 @@ VkResult create_index_buffer(VulkanRenderer* renderer) {
     Buffer staging_buffer;
     size_t buffer_sizes = sizeof(u16) * 9;
     u32 shared_buffer_queue_family_indices[] = {
-        static_cast<u32>(renderer->devices.queue_families.families[static_cast<u32>(QueueFamilies::Type::GRAPHICS)].index),
-        static_cast<u32>(renderer->devices.queue_families.families[static_cast<u32>(QueueFamilies::Type::TRANSFER)].index)
+        static_cast<u32>(renderer->queue_families.families[static_cast<u32>(QueueFamilies::Type::GRAPHICS)].index),
+        static_cast<u32>(renderer->queue_families.families[static_cast<u32>(QueueFamilies::Type::TRANSFER)].index)
     };
 
     //Index Buffer
@@ -1616,18 +1616,18 @@ VkResult create_index_buffer(VulkanRenderer* renderer) {
             .pWaitSemaphores = nullptr,
             .pWaitDstStageMask = 0,
             .commandBufferCount = 1,
-            .pCommandBuffers = renderer->devices.command_pools[static_cast<u32>(QueueFamilies::Type::TRANSFER)].command_buffers,
+            .pCommandBuffers = renderer->command_pools[static_cast<u32>(QueueFamilies::Type::TRANSFER)].command_buffers,
             .signalSemaphoreCount = 0,
             .pSignalSemaphores = nullptr
         };
 
-        result = vkQueueSubmit(renderer->devices.queue_families.families[1].queues[0], 1, &submit_info, VK_NULL_HANDLE);
+        result = vkQueueSubmit(renderer->queue_families.families[1].queues[0], 1, &submit_info, VK_NULL_HANDLE);
         if(result != VK_SUCCESS) {
             printf("VkQueueSubmit failed()\n");
             return result;
         }
 
-        result = vkQueueWaitIdle(renderer->devices.queue_families.families[1].queues[0]);
+        result = vkQueueWaitIdle(renderer->queue_families.families[1].queues[0]);
         if(result != VK_SUCCESS) {
             printf("vkQueueWaitIdle failed()\n");
             return result;
