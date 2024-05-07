@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include "platform_win32.h"
 #include "vulkan_renderer.cpp"
+#include "texture.h"
 
 static size_t resolution_index = 2;
 
@@ -17,29 +18,8 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, LPSTR cmd_line, int sho
     window_create(&application.window);
     console_create();
 
-    Matrix<f32, 3, 3> matrix_a = {};
-    matrix_a[0][0] = 4;
-    matrix_a[0][1] = 2;
-    matrix_a[0][2] = 0;
-    matrix_a[1][0] = 0;
-    matrix_a[1][1] = 8;
-    matrix_a[1][2] = 1;
-    matrix_a[2][0] = 0;
-    matrix_a[2][1] = 1;
-    matrix_a[2][2] = 0;
-
-    Matrix<f32, 3, 3> matrix_b = {};
-    matrix_b[0][0] = 4;
-    matrix_b[0][1] = 2;
-    matrix_b[0][2] = 1;
-    matrix_b[1][0] = 2;
-    matrix_b[1][1] = 0;
-    matrix_b[1][2] = 4;
-    matrix_b[2][0] = 9;
-    matrix_b[2][1] = 4;
-    matrix_b[2][2] = 2;
-
-    auto matrix_c = matrix_a * matrix_b;
+    ImageData image;
+    load_image("textures/pepe.png", &image);
 
     VulkanRendererInitInfo vulkan_renderer_init_info = {
         .renderer = &application.renderer,

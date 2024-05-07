@@ -6,6 +6,7 @@
 #include "math.h"
 #include "memory.h"
 #include "time.h"
+#include "texture.h"
 
 struct Vertex {
     Vec2 position;
@@ -46,14 +47,14 @@ static constexpr u16 vertex_indices[] = {
 };
 
 static constexpr Vertex quad_vertices[] = {
-    { { -0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
-    { { 0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f } },
-    { { 0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } },
-    { { -0.5f, 0.5f }, { 1.0f, 1.0f, 1.0f } }
+    { { -0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f } },
+    { { -0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f } },
+    { { 0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
+    { { 0.5f, 0.5f }, { 1.0f, 0.0f, 0.0f } }
 };
 
 static constexpr u16 quad_indices[] = {
-    0, 1, 2, 2, 3, 0
+    0, 1, 2, 0, 2, 3
 };
 
 struct QueueFamily {
@@ -210,6 +211,14 @@ struct VulkanRendererInitInfo {
     HINSTANCE window_instance = NULL;
 };
 
+struct Texture {
+    ImageData image_data;
+    VkImage image;
+    VkImageView view;
+    VkDeviceMemory memory;
+    VkDeviceSize size;
+};
+
 VkResult create_renderer(VulkanRendererInitInfo* vulkan_renderer_init_info);
 VkResult create_instance(VulkanRendererInitInfo* vulkan_renderer_init_info);
 VkResult create_win32_surface(VulkanRendererInitInfo* vulkan_renderer_init_info);
@@ -246,3 +255,5 @@ VkResult update_uniform_buffer(VulkanRenderer* renderer, size_t image_index, Tim
 
 VkResult create_descriptor_pool(VulkanRenderer* renderer);
 VkResult create_descriptor_sets(VulkanRenderer* renderer);
+
+VkResult load_texture(VulkanRenderer* renderer, const char* filename);

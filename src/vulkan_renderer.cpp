@@ -397,7 +397,7 @@ VkResult query_swapchain_support(VulkanRenderer* renderer) {
     //printf("Surface Formats supported:\n");
     for(size_t i = 0; i < surface_format_count; ++i) {
         VkSurfaceFormatKHR surface_format = renderer->swapchain.support_info.surface_formats[i];
-        if(surface_format.format == VK_FORMAT_B8G8R8A8_SRGB && surface_format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+        if(surface_format.format == VK_FORMAT_B8G8R8A8_UNORM && surface_format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
             renderer->swapchain.surface_format = surface_format;
         }
         //printf("%s [%s]\n", string_VkFormat(surface_format.format), string_VkColorSpaceKHR(surface_format.colorSpace));
@@ -1137,7 +1137,7 @@ VkResult record_command_buffer(VulkanRenderer* renderer, VkCommandBuffer command
     vkCmdBindVertexBuffers(command_buffer, 0, 1, vertex_buffers, offsets);
     vkCmdBindIndexBuffer(command_buffer, renderer->graphics_pipeline.index_buffer.buffer, 0, VkIndexType::VK_INDEX_TYPE_UINT16);
     vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer->graphics_pipeline.layout, 0, 1, &renderer->graphics_pipeline.descriptor_sets[renderer->swapchain.current_frame_index], 0, nullptr);
-    vkCmdDrawIndexed(command_buffer, 9, 1, 0, 0, 0);
+    vkCmdDrawIndexed(command_buffer, 6, 1, 0, 0, 0);
     //vkCmdDraw(command_buffer, 9, 1, 0, 0);\
 
     vkCmdEndRenderPass(command_buffer);
@@ -1406,6 +1406,8 @@ VkResult create_buffer(VulkanRenderer* renderer, BufferAllocationInfo* buffer_al
         }
     }
 
+    vkMapMemory(renderer->devices.logical.device, buffer_allocation_info->buffer->device_memory, 0, buffer_allocation_info->size, 0, &buffer_allocation_info->buffer->data);
+
     return result;
 }
 
@@ -1465,7 +1467,7 @@ VkResult create_vertex_buffer(VulkanRenderer* renderer) {
     VkResult result = VK_ERROR_UNKNOWN;
 
     Buffer staging_buffer;
-    VkDeviceSize buffer_sizes = sizeof(Vertex) * 6;
+    VkDeviceSize buffer_sizes = sizeof(Vertex) * 4;
     u32 shared_buffer_queue_family_indices[] = {
         static_cast<u32>(renderer->queue_families.families[static_cast<u32>(QueueFamilies::Type::GRAPHICS)].index),
         static_cast<u32>(renderer->queue_families.families[static_cast<u32>(QueueFamilies::Type::TRANSFER)].index)
@@ -1494,7 +1496,8 @@ VkResult create_vertex_buffer(VulkanRenderer* renderer) {
                 printf("vkMapMemory() failed.\n");
                 return result;
             }
-            memcpy_s(data, buffer_sizes, indexed_triforce_vertices, buffer_sizes);
+            //memcpy_s(data, buffer_sizes, indexed_triforce_vertices, buffer_sizes);
+            memcpy_s(data, buffer_sizes, quad_vertices, buffer_sizes);
             vkUnmapMemory(renderer->devices.logical.device, staging_buffer.device_memory);
         }
     }
@@ -1554,7 +1557,7 @@ VkResult create_index_buffer(VulkanRenderer* renderer) {
     VkResult result = VK_ERROR_UNKNOWN;
 
     Buffer staging_buffer;
-    size_t buffer_sizes = sizeof(u16) * 9;
+    size_t buffer_sizes = sizeof(u16) * 6;
     u32 shared_buffer_queue_family_indices[] = {
         static_cast<u32>(renderer->queue_families.families[static_cast<u32>(QueueFamilies::Type::GRAPHICS)].index),
         static_cast<u32>(renderer->queue_families.families[static_cast<u32>(QueueFamilies::Type::TRANSFER)].index)
@@ -1600,7 +1603,7 @@ VkResult create_index_buffer(VulkanRenderer* renderer) {
                 printf("vkMapMemory() failed.\n");
                 return result;
             }
-            memcpy_s(data, buffer_sizes, vertex_indices, buffer_sizes);
+            memcpy_s(data, buffer_sizes, quad_indices, buffer_sizes);
             vkUnmapMemory(renderer->devices.logical.device, staging_buffer.device_memory);
         }
     }
@@ -1705,8 +1708,8 @@ VkResult update_uniform_buffer(VulkanRenderer* renderer, size_t image_index, Tim
     // clang-format on
 
     UniformBufferObject uniform_buffer_object = {
-        .model = rotate_90,
-        .view = view_transform,
+        .model = MAT4_IDENTITY,
+        .view = MAT4_IDENTITY,
         .projection = MAT4_IDENTITY
     };
 
@@ -1785,6 +1788,36 @@ VkResult create_descriptor_sets(VulkanRenderer* renderer) {
 
         vkUpdateDescriptorSets(renderer->devices.logical.device, 1, &write_descriptor_set, 0, nullptr);
     }
+
+    return result;
+}
+
+VkResult load_texture(VulkanRenderer* renderer, const char* filename) {
+    VkResult result = VK_ERROR_UNKNOWN;
+    ImageData image_data = {};
+    if(!load_image(filename, &image_data)) {
+        printf("load_image() failed.\n");
+        return result;
+    }
+
+    Buffer staging_buffer = {};
+
+    BufferAllocationInfo buffer_allocation_info = {
+        .buffer = &staging_buffer,
+        .usage_flags = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        .memory_properties = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+        .size = image_data.size,
+        .sharing_mode = VK_SHARING_MODE_EXCLUSIVE,
+        .queue_families_indices_count = 0,
+        .queue_family_indices = nullptr
+    };
+
+    if(create_buffer(renderer, &buffer_allocation_info)) {
+        printf("create_buffer() failed.\n");
+        return result;
+    }
+
+    memcpy_s(staging_buffer.data, image_data.size, image_data.pixels, image_data.size);
 
     return result;
 }
