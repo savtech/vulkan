@@ -82,24 +82,41 @@ struct Synchronization {
     static constexpr size_t MAX_SEMAPHORES = 8;
     static constexpr size_t MAX_FENCES = 8;
 
-    size_t semaphore_count = 0;
     VkSemaphore semaphores[MAX_SEMAPHORES];
-    size_t fence_count = 0;
     VkFence fences[MAX_FENCES];
+};
+
+struct CommandBuffers {
+    static constexpr size_t MAX_BUFFERS = 4;
+
+    enum class Graphics : size_t {
+        DRAW_FRAME,
+        TRANSITION_IMAGE_LAYOUT,
+        COUNT
+    };
+
+    enum class Transfer : size_t {
+        BUFFER_TO_BUFFER,
+        BUFFER_TO_IMAGE,
+        COUNT
+    };
+
+    VkCommandBuffer buffer[MAX_BUFFERS];
+    Synchronization synchro[MAX_BUFFERS];
 };
 
 struct CommandPool {
     VkCommandPool pool = VK_NULL_HANDLE;
-    size_t buffer_count = 0;
-    VkCommandBuffer* command_buffers = VK_NULL_HANDLE;
-    Synchronization* synchro = nullptr;
+    CommandBuffers* buffers = nullptr;
 };
 
 struct CommandBufferAllocationInfo {
     QueueFamilies::Type pool_type;
+    CommandBuffers::Graphics graphics_buffer_type;
+    CommandBuffers::Transfer transfer_buffer_type;
     size_t buffer_count = 0;
-    size_t* semaphore_count = nullptr;
-    size_t* fence_count = nullptr;
+    size_t semaphore_count = 0;
+    size_t fence_count = 0;
 };
 
 struct Swapchain {
@@ -257,3 +274,7 @@ VkResult create_descriptor_pool(VulkanRenderer* renderer);
 VkResult create_descriptor_sets(VulkanRenderer* renderer);
 
 VkResult load_texture(VulkanRenderer* renderer, const char* filename);
+
+size_t find_memory_type_index(VulkanRenderer* renderer, u32 memory_type_bits, VkMemoryPropertyFlags memory_property_flags);
+
+VkResult transition_image_layout(VulkanRenderer* renderer, VkImage image, VkFormat format, VkImageLayout old_layout, VkImageLayout new_layout);

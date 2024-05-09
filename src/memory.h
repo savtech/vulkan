@@ -10,13 +10,6 @@ struct MemoryArena {
     void* data = nullptr;
 };
 
-// MemoryArena* memory_arena_create(size_t bytes);
-// void* memory_arena_allocate(MemoryArena* arena, size_t bytes);
-
-// size_t KB(size_t kilobytes);
-// size_t MB(size_t megabytes);
-// size_t GB(size_t gigabytes);
-
 MemoryArena* memory_arena_create(size_t bytes) {
     MemoryArena* arena = (MemoryArena*)malloc(sizeof(MemoryArena));
     if(!arena) {
@@ -53,9 +46,9 @@ size_t KB(size_t kilobytes) {
 }
 
 size_t MB(size_t megabytes) {
-    return KB(megabytes) * 1024;
+    return megabytes * KB(1024);
 }
 
 size_t GB(size_t gigabytes) {
-    return MB(gigabytes) * 1024;
+    return gigabytes * MB(1024);
 }
