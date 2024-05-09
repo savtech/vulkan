@@ -11,6 +11,7 @@
 struct Vertex {
     Vec2 position;
     Vec3 color;
+    Vec2 texture_coord;
 };
 
 struct UniformBufferObject {
@@ -19,38 +20,38 @@ struct UniformBufferObject {
     Mat4 projection;
 };
 
-static constexpr Vertex triforce_vertices[] = {
-    { { -0.5f, 0.0f }, { 1.0f, 0.0f, 0.0f } },
-    { { 0.0f, -1.0f }, { 0.0f, 1.0f, 0.0f } },
-    { { 0.5f, 0.0f }, { 0.0f, 0.0f, 1.0f } },
+// static constexpr Vertex triforce_vertices[] = {
+//     { { -0.5f, 0.0f }, { 1.0f, 0.0f, 0.0f } },
+//     { { 0.0f, -1.0f }, { 0.0f, 1.0f, 0.0f } },
+//     { { 0.5f, 0.0f }, { 0.0f, 0.0f, 1.0f } },
 
-    { { -1.0f, 1.0f }, { 1.0f, 0.0f, 0.0f } },
-    { { -0.5f, 0.0f }, { 0.0f, 1.0f, 0.0f } },
-    { { 0.0f, 1.0f }, { 0.0f, 0.0f, 1.0f } },
+//     { { -1.0f, 1.0f }, { 1.0f, 0.0f, 0.0f } },
+//     { { -0.5f, 0.0f }, { 0.0f, 1.0f, 0.0f } },
+//     { { 0.0f, 1.0f }, { 0.0f, 0.0f, 1.0f } },
 
-    { { 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f } },
-    { { 0.5f, 0.0f }, { 0.0f, 1.0f, 0.0f } },
-    { { 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f } }
-};
+//     { { 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f } },
+//     { { 0.5f, 0.0f }, { 0.0f, 1.0f, 0.0f } },
+//     { { 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f } }
+// };
 
-static constexpr Vertex indexed_triforce_vertices[] = {
-    { { -1.0f, 1.0f }, { 1.0f, 0.0f, 0.0f } },
-    { { -0.5f, 0.0f }, { 0.5f, 0.5f, 0.0f } },
-    { { 0.0f, 1.0f }, { 0.5f, 0.0f, 0.5f } },
-    { { 0.0f, -1.0f }, { 0.0f, 1.0f, 0.0f } },
-    { { 0.5f, 0.0f }, { 0.0f, 0.5f, 0.5f } },
-    { { 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f } }
-};
+// static constexpr Vertex indexed_triforce_vertices[] = {
+//     { { -1.0f, 1.0f }, { 1.0f, 0.0f, 0.0f } },
+//     { { -0.5f, 0.0f }, { 0.5f, 0.5f, 0.0f } },
+//     { { 0.0f, 1.0f }, { 0.5f, 0.0f, 0.5f } },
+//     { { 0.0f, -1.0f }, { 0.0f, 1.0f, 0.0f } },
+//     { { 0.5f, 0.0f }, { 0.0f, 0.5f, 0.5f } },
+//     { { 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f } }
+// };
 
-static constexpr u16 vertex_indices[] = {
-    0, 1, 2, 1, 3, 4, 2, 4, 5
-};
+// static constexpr u16 vertex_indices[] = {
+//     0, 1, 2, 1, 3, 4, 2, 4, 5
+// };
 
 static constexpr Vertex quad_vertices[] = {
-    { { -0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f } },
-    { { -0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f } },
-    { { 0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
-    { { 0.5f, 0.5f }, { 1.0f, 0.0f, 0.0f } }
+    { { -0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f }, { 1.0f, 0.0f } },
+    { { 0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f } },
+    { { 0.5f, 0.5f }, { 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f } },
+    { { -0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f }, { 1.0f, 1.0f } }
 };
 
 static constexpr u16 quad_indices[] = {
@@ -174,6 +175,21 @@ struct BufferAllocationInfo {
     u32* queue_family_indices = nullptr;
 };
 
+struct Texture {
+    ImageData image_data;
+    VkImage image;
+    VkImageView image_view;
+    VkDeviceMemory device_memory;
+};
+
+struct TextureAtlas {
+    static constexpr size_t MAX_TEXTURES = 64;
+
+    size_t next_texture_index = 0;
+    Texture textures[MAX_TEXTURES];
+    VkSampler sampler;
+};
+
 struct GraphicsPipeline {
     ShaderData shader_data = {};
     VkPipelineLayout layout = VK_NULL_HANDLE;
@@ -185,7 +201,7 @@ struct GraphicsPipeline {
     Buffer vertex_buffer = {};
     Buffer index_buffer = {};
     Buffer uniform_buffers[Swapchain::MAX_FRAMES_IN_FLIGHT];
-    VkDescriptorPool descriptor_pool;
+    VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
 };
 
 struct Devices {
@@ -212,6 +228,7 @@ struct VulkanRenderer {
     GraphicsPipeline point_pipeline = {};
     QueueFamilies queue_families = {};
     CommandPool command_pools[QueueFamilies::MAX_QUEUE_FAMILIES];
+    TextureAtlas texture_atlas = {};
 
     bool resizing = false;
     bool should_render = true;
@@ -226,14 +243,6 @@ struct VulkanRendererInitInfo {
     const char* application_name = "";
     HWND window_handle = NULL;
     HINSTANCE window_instance = NULL;
-};
-
-struct Texture {
-    ImageData image_data;
-    VkImage image;
-    VkImageView view;
-    VkDeviceMemory memory;
-    VkDeviceSize size;
 };
 
 VkResult create_renderer(VulkanRendererInitInfo* vulkan_renderer_init_info);
@@ -272,6 +281,8 @@ VkResult update_uniform_buffer(VulkanRenderer* renderer, size_t image_index, Tim
 
 VkResult create_descriptor_pool(VulkanRenderer* renderer);
 VkResult create_descriptor_sets(VulkanRenderer* renderer);
+
+VkResult create_texture_atlas(VulkanRenderer* renderer);
 
 VkResult load_texture(VulkanRenderer* renderer, const char* filename);
 

@@ -154,6 +154,18 @@ VkResult create_renderer(VulkanRendererInitInfo* vulkan_renderer_init_info) {
         return result;
     }
 
+    result = create_texture_atlas(renderer);
+    if(result != VK_SUCCESS) {
+        printf("create_texture_atlas() failed.\n");
+        return result;
+    }
+
+    result = load_texture(renderer, "textures/pepe.png");
+    if(result != VK_SUCCESS) {
+        printf("load_texture() failed.\n");
+        return result;
+    }
+
     result = create_descriptor_pool(renderer);
     if(result != VK_SUCCESS) {
         printf("create_descriptor_pool() failed.\n");
@@ -163,12 +175,6 @@ VkResult create_renderer(VulkanRendererInitInfo* vulkan_renderer_init_info) {
     result = create_descriptor_sets(renderer);
     if(result != VK_SUCCESS) {
         printf("create_descriptor_sets() failed.\n");
-        return result;
-    }
-
-    result = load_texture(renderer, "textures/pepe.png");
-    if(result != VK_SUCCESS) {
-        printf("load_texture() failed.\n");
         return result;
     }
 
@@ -696,13 +702,21 @@ VkResult create_graphics_pipeline(VulkanRenderer* renderer) {
         .offset = 8 //offsetof(Vertex, color)
     };
 
+    VkVertexInputAttributeDescription texture_coord_attribute_description = {
+        .location = 2,
+        .binding = 0,
+        .format = VkFormat::VK_FORMAT_R32G32_SFLOAT,
+        .offset = 20
+    };
+
     VkVertexInputBindingDescription vertex_input_binding_descriptions[] = {
         vertex_binding_description
     };
 
     VkVertexInputAttributeDescription vertex_input_attribute_descriptions[] = {
         position_attribute_description,
-        color_attribute_description
+        color_attribute_description,
+        texture_coord_attribute_description
     };
 
     VkPipelineVertexInputStateCreateInfo pipeline_vertex_input_state_create_info = {
@@ -711,7 +725,7 @@ VkResult create_graphics_pipeline(VulkanRenderer* renderer) {
         .flags = 0,
         .vertexBindingDescriptionCount = 1,
         .pVertexBindingDescriptions = vertex_input_binding_descriptions,
-        .vertexAttributeDescriptionCount = 2,
+        .vertexAttributeDescriptionCount = 3,
         .pVertexAttributeDescriptions = vertex_input_attribute_descriptions
     };
 
@@ -848,7 +862,7 @@ VkResult create_graphics_pipeline(VulkanRenderer* renderer) {
         .pDynamicStates = dynamic_states
     };
 
-    VkDescriptorSetLayoutBinding layout_binding = {
+    VkDescriptorSetLayoutBinding ubo_layout_binding = {
         .binding = 0,
         .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         .descriptorCount = 1,
@@ -856,12 +870,25 @@ VkResult create_graphics_pipeline(VulkanRenderer* renderer) {
         .pImmutableSamplers = nullptr
     };
 
+    VkDescriptorSetLayoutBinding sampler_layout_binding = {
+        .binding = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = 1,
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        .pImmutableSamplers = nullptr
+    };
+
+    VkDescriptorSetLayoutBinding bindings[] = {
+        ubo_layout_binding,
+        sampler_layout_binding
+    };
+
     VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .pNext = nullptr,
         .flags = 0,
-        .bindingCount = 1,
-        .pBindings = &layout_binding,
+        .bindingCount = 2,
+        .pBindings = bindings
     };
 
     result = vkCreateDescriptorSetLayout(renderer->devices.logical.device, &descriptor_set_layout_create_info, nullptr, &renderer->graphics_pipeline.descriptor_set_layout);
@@ -1761,18 +1788,30 @@ VkResult update_uniform_buffer(VulkanRenderer* renderer, size_t image_index, Tim
 VkResult create_descriptor_pool(VulkanRenderer* renderer) {
     VkResult result = VK_ERROR_UNKNOWN;
 
-    VkDescriptorPoolSize size = {
+    u32 frames_in_flight_count = static_cast<u32>(Swapchain::MAX_FRAMES_IN_FLIGHT);
+
+    VkDescriptorPoolSize ubo_size = {
         .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .descriptorCount = static_cast<u32>(Swapchain::MAX_FRAMES_IN_FLIGHT)
+        .descriptorCount = frames_in_flight_count
+    };
+
+    VkDescriptorPoolSize sampler_size = {
+        .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = frames_in_flight_count
+    };
+
+    VkDescriptorPoolSize sizes[] = {
+        ubo_size,
+        sampler_size
     };
 
     VkDescriptorPoolCreateInfo create_info = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .pNext = nullptr,
         .flags = 0,
-        .maxSets = static_cast<u32>(Swapchain::MAX_FRAMES_IN_FLIGHT),
-        .poolSizeCount = 1,
-        .pPoolSizes = &size
+        .maxSets = frames_in_flight_count,
+        .poolSizeCount = 2,
+        .pPoolSizes = sizes
     };
 
     result = vkCreateDescriptorPool(renderer->devices.logical.device, &create_info, nullptr, &renderer->graphics_pipeline.descriptor_pool);
@@ -1813,7 +1852,7 @@ VkResult create_descriptor_sets(VulkanRenderer* renderer) {
             .range = sizeof(UniformBufferObject)
         };
 
-        VkWriteDescriptorSet write_descriptor_set = {
+        VkWriteDescriptorSet ubo_descriptor_set = {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .pNext = nullptr,
             .dstSet = renderer->graphics_pipeline.descriptor_sets[buffer_index],
@@ -1826,7 +1865,64 @@ VkResult create_descriptor_sets(VulkanRenderer* renderer) {
             .pTexelBufferView = nullptr
         };
 
-        vkUpdateDescriptorSets(renderer->devices.logical.device, 1, &write_descriptor_set, 0, nullptr);
+        VkDescriptorImageInfo image_info = {
+            .sampler = renderer->texture_atlas.sampler,
+            .imageView = renderer->texture_atlas.textures[0].image_view,
+            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        };
+
+        VkWriteDescriptorSet sampler_descriptor_set = {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .pNext = nullptr,
+            .dstSet = renderer->graphics_pipeline.descriptor_sets[buffer_index],
+            .dstBinding = 1,
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo = &image_info,
+            .pBufferInfo = nullptr,
+            .pTexelBufferView = nullptr
+        };
+
+        VkWriteDescriptorSet write_descriptor_sets[] = {
+            ubo_descriptor_set,
+            sampler_descriptor_set
+        };
+
+        vkUpdateDescriptorSets(renderer->devices.logical.device, 2, write_descriptor_sets, 0, nullptr);
+    }
+
+    return result;
+}
+
+VkResult create_texture_atlas(VulkanRenderer* renderer) {
+    VkResult result = VK_ERROR_UNKNOWN;
+
+    VkSamplerCreateInfo sampler_create_info = {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .magFilter = VK_FILTER_LINEAR,
+        .minFilter = VK_FILTER_LINEAR,
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .mipLodBias = 0.0f,
+        .anisotropyEnable = VK_TRUE,
+        .maxAnisotropy = renderer->devices.physical.properties.limits.maxSamplerAnisotropy,
+        .compareEnable = VK_FALSE,
+        .compareOp = VkCompareOp::VK_COMPARE_OP_NEVER,
+        .minLod = 0.0f,
+        .maxLod = 0.0f,
+        .borderColor = VkBorderColor::VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+        .unnormalizedCoordinates = VK_FALSE
+    };
+
+    result = vkCreateSampler(renderer->devices.logical.device, &sampler_create_info, nullptr, &renderer->texture_atlas.sampler);
+    if(result != VK_SUCCESS) {
+        printf("vkCreateSampler() failed.\n");
+        return result;
     }
 
     return result;
@@ -1835,9 +1931,9 @@ VkResult create_descriptor_sets(VulkanRenderer* renderer) {
 VkResult load_texture(VulkanRenderer* renderer, const char* filename) {
     VkResult result = VK_ERROR_UNKNOWN;
 
-    Texture texture = {};
+    Texture* texture = &renderer->texture_atlas.textures[renderer->texture_atlas.next_texture_index];
 
-    if(!load_image(filename, &texture.image_data)) {
+    if(!load_image(filename, &texture->image_data)) {
         printf("load_image() failed.\n");
         return result;
     }
@@ -1848,7 +1944,7 @@ VkResult load_texture(VulkanRenderer* renderer, const char* filename) {
         .buffer = &staging_buffer,
         .usage_flags = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         .memory_properties = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-        .size = texture.image_data.size,
+        .size = texture->image_data.size,
         .sharing_mode = VK_SHARING_MODE_EXCLUSIVE,
         .queue_families_indices_count = 0,
         .queue_family_indices = nullptr
@@ -1860,7 +1956,7 @@ VkResult load_texture(VulkanRenderer* renderer, const char* filename) {
         return result;
     }
 
-    memcpy_s(staging_buffer.data, texture.image_data.size, texture.image_data.pixels, texture.image_data.size);
+    memcpy_s(staging_buffer.data, texture->image_data.size, texture->image_data.pixels, texture->image_data.size);
 
     VkImageCreateInfo image_create_info = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -1869,8 +1965,8 @@ VkResult load_texture(VulkanRenderer* renderer, const char* filename) {
         .imageType = VK_IMAGE_TYPE_2D,
         .format = VK_FORMAT_R8G8B8A8_SRGB,
         .extent = {
-            .width = texture.image_data.width,
-            .height = texture.image_data.height,
+            .width = texture->image_data.width,
+            .height = texture->image_data.height,
             .depth = 1 },
         .mipLevels = 1,
         .arrayLayers = 1,
@@ -1883,14 +1979,14 @@ VkResult load_texture(VulkanRenderer* renderer, const char* filename) {
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
     };
 
-    result = vkCreateImage(renderer->devices.logical.device, &image_create_info, nullptr, &texture.image);
+    result = vkCreateImage(renderer->devices.logical.device, &image_create_info, nullptr, &texture->image);
     if(result != VK_SUCCESS) {
         printf("vkCreateImage() failed.\n");
         return result;
     }
 
     VkMemoryRequirements image_memory_requirements;
-    vkGetImageMemoryRequirements(renderer->devices.logical.device, texture.image, &image_memory_requirements);
+    vkGetImageMemoryRequirements(renderer->devices.logical.device, texture->image, &image_memory_requirements);
 
     VkMemoryAllocateInfo image_memory_info = {
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -1899,19 +1995,19 @@ VkResult load_texture(VulkanRenderer* renderer, const char* filename) {
         .memoryTypeIndex = (u32)find_memory_type_index(renderer, image_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
     };
 
-    result = vkAllocateMemory(renderer->devices.logical.device, &image_memory_info, nullptr, &texture.memory);
+    result = vkAllocateMemory(renderer->devices.logical.device, &image_memory_info, nullptr, &texture->device_memory);
     if(result != VK_SUCCESS) {
         printf("vkAllocateMemory() failed.\n");
         return result;
     }
 
-    result = vkBindImageMemory(renderer->devices.logical.device, texture.image, texture.memory, 0);
+    result = vkBindImageMemory(renderer->devices.logical.device, texture->image, texture->device_memory, 0);
     if(result != VK_SUCCESS) {
         printf("vkBindImageMemory() failed.\n");
         return result;
     }
 
-    result = transition_image_layout(renderer, texture.image, image_create_info.format, image_create_info.initialLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    result = transition_image_layout(renderer, texture->image, image_create_info.format, image_create_info.initialLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     if(result != VK_SUCCESS) {
         printf("transition_image_layout() failed.\n");
         return result;
@@ -1942,8 +2038,8 @@ VkResult load_texture(VulkanRenderer* renderer, const char* filename) {
         .imageSubresource = subresource_layers,
         .imageOffset = { 0, 0, 0 },
         .imageExtent = {
-            .width = texture.image_data.width,
-            .height = texture.image_data.height,
+            .width = texture->image_data.width,
+            .height = texture->image_data.height,
             .depth = 1 }
     };
 
@@ -1953,7 +2049,7 @@ VkResult load_texture(VulkanRenderer* renderer, const char* filename) {
         return result;
     }
 
-    vkCmdCopyBufferToImage(command_buffer, staging_buffer.buffer, texture.image, VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    vkCmdCopyBufferToImage(command_buffer, staging_buffer.buffer, texture->image, VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
     result = vkEndCommandBuffer(command_buffer);
     if(result != VK_SUCCESS) {
@@ -1987,11 +2083,35 @@ VkResult load_texture(VulkanRenderer* renderer, const char* filename) {
         return result;
     }
 
-    result = transition_image_layout(renderer, texture.image, image_create_info.format, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    result = transition_image_layout(renderer, texture->image, image_create_info.format, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     if(result != VK_SUCCESS) {
         printf("transition_image_layout() failed.\n");
         return result;
     }
+
+    VkImageViewCreateInfo image_view_create_info = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .image = texture->image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = VK_FORMAT_R8G8B8A8_SRGB,
+        .components = {
+            .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .a = VK_COMPONENT_SWIZZLE_IDENTITY },
+        .subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 }
+
+    };
+
+    result = vkCreateImageView(renderer->devices.logical.device, &image_view_create_info, nullptr, &texture->image_view);
+    if(result != VK_SUCCESS) {
+        printf("vkCreateImageView() failed.\n");
+        return result;
+    }
+
+    ++renderer->texture_atlas.next_texture_index;
 
     return result;
 }
