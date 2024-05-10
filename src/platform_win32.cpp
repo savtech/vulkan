@@ -2,7 +2,6 @@
 #include <stdio.h>
 #include "platform_win32.h"
 #include "vulkan_renderer.cpp"
-#include "texture.h"
 
 static size_t resolution_index = 2;
 
@@ -17,9 +16,6 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, LPSTR cmd_line, int sho
 
     window_create(&application.window);
     console_create();
-
-    ImageData image;
-    load_image("textures/pepe.png", &image);
 
     VulkanRendererInitInfo vulkan_renderer_init_info = {
         .renderer = &application.renderer,

@@ -14,21 +14,3 @@ using i64 = int64_t;
 
 using f32 = float;
 using f64 = double;
-
-// struct Vec2 {
-//     f32 x = 0.0f;
-//     f32 y = 0.0f;
-// };
-
-// struct Vec3 {
-//     f32 x = 0.0f;
-//     f32 y = 0.0f;
-//     f32 z = 0.0f;
-// };
-
-// struct Vec4 {
-//     f32 x = 0.0f;
-//     f32 y = 0.0f;
-//     f32 z = 0.0f;
-//     f32 w = 0.0f;
-// };

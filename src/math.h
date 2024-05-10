@@ -114,6 +114,11 @@ using Vec2 = Vector<f32, 2>;
 using Vec3 = Vector<f32, 3>;
 using Vec4 = Vector<f32, 4>;
 
+struct Rect {
+    Vec2 start;
+    Vec2 end;
+};
+
 template<typename T, size_t C, size_t R>
 struct Matrix {
     T data[C][R];

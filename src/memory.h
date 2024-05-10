@@ -7,7 +7,7 @@
 struct MemoryArena {
     size_t size = 0;
     size_t used = 0;
-    void* data = nullptr;
+    void* memory = nullptr;
 };
 
 MemoryArena* memory_arena_create(size_t bytes) {
@@ -17,9 +17,9 @@ MemoryArena* memory_arena_create(size_t bytes) {
         return nullptr;
     }
 
-    arena->data = malloc(bytes);
-    if(!arena->data) {
-        printf("malloc() failed. [MemoryArena data allocation]\n");
+    arena->memory = malloc(bytes);
+    if(!arena->memory) {
+        printf("malloc() failed. [MemoryArena memory allocation]\n");
         free(arena);
         return nullptr;
     }
@@ -36,9 +36,14 @@ void* memory_arena_allocate(MemoryArena* arena, size_t bytes) {
         return nullptr;
     }
 
-    void* memory = (u8*)arena->data + arena->used;
+    void* memory = (u8*)arena->memory + arena->used;
     arena->used += bytes;
     return memory;
+}
+
+void memory_arena_free(MemoryArena* arena) {
+    free(arena->memory);
+    free(arena);
 }
 
 size_t KB(size_t kilobytes) {

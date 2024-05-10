@@ -173,6 +173,7 @@ struct BufferAllocationInfo {
     VkSharingMode sharing_mode;
     u32 queue_families_indices_count = 0;
     u32* queue_family_indices = nullptr;
+    bool map_memory = false;
 };
 
 struct Texture {
@@ -188,6 +189,17 @@ struct TextureAtlas {
     size_t next_texture_index = 0;
     Texture textures[MAX_TEXTURES];
     VkSampler sampler;
+};
+
+struct Transform {
+    Mat4 translation = MAT4_IDENTITY;
+    Mat4 rotation = MAT4_IDENTITY;
+    Mat4 scale = MAT4_IDENTITY;
+};
+
+struct Sprite {
+    Texture* texture = nullptr;
+    Transform transform = {};
 };
 
 struct GraphicsPipeline {
@@ -269,7 +281,7 @@ VkResult resize(VulkanRenderer* renderer);
 
 VkResult create_point_pipeline(VulkanRenderer* renderer);
 
-size_t get_queue_family_index(VulkanRenderer* renderer, QueueFamilies::Type type);
+u32 get_queue_family_index(VulkanRenderer* renderer, QueueFamilies::Type type);
 
 VkResult record_staging_command_buffer(VulkanRenderer* renderer, Buffer* buffer, VkDeviceSize size);
 
@@ -289,3 +301,6 @@ VkResult load_texture(VulkanRenderer* renderer, const char* filename);
 size_t find_memory_type_index(VulkanRenderer* renderer, u32 memory_type_bits, VkMemoryPropertyFlags memory_property_flags);
 
 VkResult transition_image_layout(VulkanRenderer* renderer, VkImage image, VkFormat format, VkImageLayout old_layout, VkImageLayout new_layout);
+
+Sprite* create_sprite(VulkanRenderer* renderer, size_t texture_id);
+VkResult update_sprites(VulkanRenderer* renderer, Sprite* sprites[]);

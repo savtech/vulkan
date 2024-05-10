@@ -3,13 +3,14 @@
 #include <vector>
 #include "vulkan_renderer.h"
 
-static MemoryArena* temporary_memory = memory_arena_create(MB(500));
+static MemoryArena* temporary_memory = nullptr;
 
 VkResult create_renderer(VulkanRendererInitInfo* vulkan_renderer_init_info) {
     VkResult result = VK_ERROR_UNKNOWN;
 
     VulkanRenderer* renderer = vulkan_renderer_init_info->renderer;
     renderer->heap_data = memory_arena_create(MB(500));
+    temporary_memory = memory_arena_create(MB(500));
 
     result = create_instance(vulkan_renderer_init_info);
     if(result != VK_SUCCESS) {
@@ -177,6 +178,8 @@ VkResult create_renderer(VulkanRendererInitInfo* vulkan_renderer_init_info) {
         printf("create_descriptor_sets() failed.\n");
         return result;
     }
+
+    memory_arena_free(temporary_memory);
 
     return result;
 }
@@ -1045,9 +1048,7 @@ VkResult create_command_pools(VulkanRenderer* renderer) {
             .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
             .pNext = nullptr,
             .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-            //The following can maybe be a function call with a signature like: size_t get_queue_family_index(QueueFamilies::Type type) and we'll keep track of specific indices
-            //for graphics, compute, etc. families in some array in the QueueFamilies struct. This will always return index 0 as we only have the GRAPHICS type in the enum currently
-            .queueFamilyIndex = static_cast<u32>(renderer->queue_families.families[command_pool_index].index)
+            .queueFamilyIndex = get_queue_family_index(renderer, QueueFamilies::Type(command_pool_index))
         };
 
         result = vkCreateCommandPool(renderer->devices.logical.device, &command_pool_create_info, nullptr, &renderer->command_pools[command_pool_index].pool);
@@ -1444,29 +1445,26 @@ VkResult create_buffer(VulkanRenderer* renderer, BufferAllocationInfo* buffer_al
     VkMemoryRequirements buffer_memory_requirements;
     vkGetBufferMemoryRequirements(renderer->devices.logical.device, buffer_allocation_info->buffer->buffer, &buffer_memory_requirements);
 
-    for(size_t memory_type_index = 0; memory_type_index < renderer->devices.physical.memory_properties.memoryTypeCount; ++memory_type_index) {
-        if(
-            (buffer_memory_requirements.memoryTypeBits & (1 << memory_type_index)) &&
-            (buffer_allocation_info->memory_properties) & renderer->devices.physical.memory_properties.memoryTypes[memory_type_index].propertyFlags) {
-            VkMemoryAllocateInfo allocate_info = {
-                .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-                .pNext = nullptr,
-                .allocationSize = buffer_memory_requirements.size,
-                .memoryTypeIndex = (u32)memory_type_index
-            };
+    size_t memory_type_index = find_memory_type_index(renderer, buffer_memory_requirements.memoryTypeBits, buffer_allocation_info->memory_properties);
 
-            result = vkAllocateMemory(renderer->devices.logical.device, &allocate_info, nullptr, &buffer_allocation_info->buffer->device_memory);
-            if(result != VK_SUCCESS) {
-                printf("vkAllocateMemory() failed.\n");
-                return result;
-            } else {
-                vkBindBufferMemory(renderer->devices.logical.device, buffer_allocation_info->buffer->buffer, buffer_allocation_info->buffer->device_memory, 0);
-            }
-            break;
-        }
+    VkMemoryAllocateInfo allocate_info = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .pNext = nullptr,
+        .allocationSize = buffer_memory_requirements.size,
+        .memoryTypeIndex = (u32)memory_type_index
+    };
+
+    result = vkAllocateMemory(renderer->devices.logical.device, &allocate_info, nullptr, &buffer_allocation_info->buffer->device_memory);
+    if(result != VK_SUCCESS) {
+        printf("vkAllocateMemory() failed.\n");
+        return result;
     }
 
-    vkMapMemory(renderer->devices.logical.device, buffer_allocation_info->buffer->device_memory, 0, buffer_allocation_info->size, 0, &buffer_allocation_info->buffer->data);
+    vkBindBufferMemory(renderer->devices.logical.device, buffer_allocation_info->buffer->buffer, buffer_allocation_info->buffer->device_memory, 0);
+
+    if(buffer_allocation_info->map_memory) {
+        vkMapMemory(renderer->devices.logical.device, buffer_allocation_info->buffer->device_memory, 0, buffer_allocation_info->size, 0, &buffer_allocation_info->buffer->data);
+    }
 
     return result;
 }
@@ -1500,28 +1498,9 @@ VkResult record_staging_command_buffer(VulkanRenderer* renderer, Buffer* staging
     return result;
 }
 
-size_t get_queue_family_index(VulkanRenderer* renderer, QueueFamilies::Type type) {
+u32 get_queue_family_index(VulkanRenderer* renderer, QueueFamilies::Type type) {
     size_t index = static_cast<size_t>(type);
-    return renderer->queue_families.families[index].index;
-}
-
-void map_memory() {
-    // result = vkBindBufferMemory(renderer->devices.logical.device, renderer->graphics_pipeline.vertex_buffer.buffer, renderer->graphics_pipeline.vertex_buffer.device_memory, 0);
-    // if(result != VK_SUCCESS) {
-    //     printf("vkBindBufferMemory() failed.\n");
-    //     return result;
-    // }
-
-    // void* data;
-    // result = vkMapMemory(renderer->devices.logical.device, renderer->graphics_pipeline.vertex_buffer.device_memory, 0, vertex_buffer_info.size, 0, &data);
-    // if(result != VK_SUCCESS) {
-    //     printf("vkMapMemory() failed.\n");
-    //     return result;
-    // }
-
-    // memcpy(data, triangle_vertices, vertex_buffer_info.size);
-
-    // vkUnmapMemory(renderer->devices.logical.device, renderer->graphics_pipeline.vertex_buffer.device_memory);
+    return static_cast<u32>(renderer->queue_families.families[index].index);
 }
 
 VkResult create_vertex_buffer(VulkanRenderer* renderer) {
@@ -1530,8 +1509,8 @@ VkResult create_vertex_buffer(VulkanRenderer* renderer) {
     Buffer staging_buffer;
     VkDeviceSize buffer_sizes = sizeof(Vertex) * 4;
     u32 shared_buffer_queue_family_indices[] = {
-        static_cast<u32>(renderer->queue_families.families[static_cast<u32>(QueueFamilies::Type::GRAPHICS)].index),
-        static_cast<u32>(renderer->queue_families.families[static_cast<u32>(QueueFamilies::Type::TRANSFER)].index)
+        get_queue_family_index(renderer, QueueFamilies::Type::GRAPHICS),
+        get_queue_family_index(renderer, QueueFamilies::Type::TRANSFER)
     };
 
     //Vertex Staging Buffer
@@ -1543,7 +1522,8 @@ VkResult create_vertex_buffer(VulkanRenderer* renderer) {
             .size = buffer_sizes,
             .sharing_mode = VK_SHARING_MODE_CONCURRENT,
             .queue_families_indices_count = 2,
-            .queue_family_indices = shared_buffer_queue_family_indices
+            .queue_family_indices = shared_buffer_queue_family_indices,
+            .map_memory = true
         };
 
         result = create_buffer(renderer, &staging_buffer_info);
@@ -1551,14 +1531,7 @@ VkResult create_vertex_buffer(VulkanRenderer* renderer) {
             printf("create_buffer() failed. [Staging Buffer]\n");
             return result;
         } else {
-            void* data;
-            result = vkMapMemory(renderer->devices.logical.device, staging_buffer.device_memory, 0, buffer_sizes, 0, &data);
-            if(result != VK_SUCCESS) {
-                printf("vkMapMemory() failed.\n");
-                return result;
-            }
-            //memcpy_s(data, buffer_sizes, indexed_triforce_vertices, buffer_sizes);
-            memcpy_s(data, buffer_sizes, quad_vertices, buffer_sizes);
+            memcpy_s(staging_buffer.data, buffer_sizes, quad_vertices, buffer_sizes);
             vkUnmapMemory(renderer->devices.logical.device, staging_buffer.device_memory);
         }
     }
@@ -1572,7 +1545,8 @@ VkResult create_vertex_buffer(VulkanRenderer* renderer) {
             .size = buffer_sizes,
             .sharing_mode = VK_SHARING_MODE_CONCURRENT,
             .queue_families_indices_count = 2,
-            .queue_family_indices = shared_buffer_queue_family_indices
+            .queue_family_indices = shared_buffer_queue_family_indices,
+            .map_memory = false
         };
 
         result = create_buffer(renderer, &vertex_buffer_info);
@@ -1622,27 +1596,11 @@ VkResult create_index_buffer(VulkanRenderer* renderer) {
 
     Buffer staging_buffer;
     size_t buffer_sizes = sizeof(u16) * 6;
+
     u32 shared_buffer_queue_family_indices[] = {
-        static_cast<u32>(renderer->queue_families.families[static_cast<u32>(QueueFamilies::Type::GRAPHICS)].index),
-        static_cast<u32>(renderer->queue_families.families[static_cast<u32>(QueueFamilies::Type::TRANSFER)].index)
+        get_queue_family_index(renderer, QueueFamilies::Type::GRAPHICS),
+        get_queue_family_index(renderer, QueueFamilies::Type::TRANSFER)
     };
-
-    //Index Buffer
-    {
-        BufferAllocationInfo index_buffer_info = {
-            .buffer = &renderer->graphics_pipeline.index_buffer,
-            .usage_flags = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            .memory_properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-            .size = buffer_sizes,
-            .sharing_mode = VK_SHARING_MODE_EXCLUSIVE
-        };
-
-        result = create_buffer(renderer, &index_buffer_info);
-        if(result != VK_SUCCESS) {
-            printf("create_buffer() failed. [Index Buffer]\n");
-            return result;
-        }
-    }
 
     //Index Staging Buffer
     {
@@ -1653,7 +1611,8 @@ VkResult create_index_buffer(VulkanRenderer* renderer) {
             .size = buffer_sizes,
             .sharing_mode = VK_SHARING_MODE_CONCURRENT,
             .queue_families_indices_count = 2,
-            .queue_family_indices = shared_buffer_queue_family_indices
+            .queue_family_indices = shared_buffer_queue_family_indices,
+            .map_memory = true
         };
 
         result = create_buffer(renderer, &staging_buffer_info);
@@ -1661,14 +1620,28 @@ VkResult create_index_buffer(VulkanRenderer* renderer) {
             printf("create_buffer() failed. [Staging Buffer]\n");
             return result;
         } else {
-            void* data;
-            result = vkMapMemory(renderer->devices.logical.device, staging_buffer.device_memory, 0, buffer_sizes, 0, &data);
-            if(result != VK_SUCCESS) {
-                printf("vkMapMemory() failed.\n");
-                return result;
-            }
-            memcpy_s(data, buffer_sizes, quad_indices, buffer_sizes);
+            memcpy_s(staging_buffer.data, buffer_sizes, quad_indices, buffer_sizes);
             vkUnmapMemory(renderer->devices.logical.device, staging_buffer.device_memory);
+        }
+    }
+
+    //Index Buffer
+    {
+        BufferAllocationInfo index_buffer_info = {
+            .buffer = &renderer->graphics_pipeline.index_buffer,
+            .usage_flags = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            .memory_properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            .size = buffer_sizes,
+            .sharing_mode = VK_SHARING_MODE_CONCURRENT,
+            .queue_families_indices_count = 2,
+            .queue_family_indices = shared_buffer_queue_family_indices,
+            .map_memory = false
+        };
+
+        result = create_buffer(renderer, &index_buffer_info);
+        if(result != VK_SUCCESS) {
+            printf("create_buffer() failed. [Index Buffer]\n");
+            return result;
         }
     }
 
@@ -1718,15 +1691,14 @@ VkResult create_uniform_buffers(VulkanRenderer* renderer) {
             .usage_flags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
             .memory_properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
             .size = buffer_size,
-            .sharing_mode = VK_SHARING_MODE_EXCLUSIVE
+            .sharing_mode = VK_SHARING_MODE_EXCLUSIVE,
+            .map_memory = true
         };
 
         result = create_buffer(renderer, &uniform_buffer_allocation_info);
         if(result != VK_SUCCESS) {
             printf("create_buffer() failed. [Uniform Buffer]\n");
             return result;
-        } else {
-            vkMapMemory(renderer->devices.logical.device, renderer->graphics_pipeline.uniform_buffers[uniform_buffer_index].device_memory, 0, buffer_size, 0, &renderer->graphics_pipeline.uniform_buffers[uniform_buffer_index].data);
         }
     }
 
@@ -1735,44 +1707,6 @@ VkResult create_uniform_buffers(VulkanRenderer* renderer) {
 
 VkResult update_uniform_buffer(VulkanRenderer* renderer, size_t image_index, Time::Duration delta_time) {
     VkResult result = VK_ERROR_UNKNOWN;
-
-    // clang-format off
-    Mat4 identity = {
-        1.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, 1.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 1.0f
-    };
-
-    Mat4 rotate_90 = {
-        0, 1, 0, 0,
-       -1, 0, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1
-    };
-
-    Mat4 scale_2 = {
-        2, 0, 0, 0,
-        0, 2, 0, 0,
-        0, 0, 2, 0,
-        0, 0, 0, 1
-    };
-
-    Mat4 scale_05 = {
-        0.5f, 0, 0, 0,
-        0, 0.5f, 0, 0,
-        0, 0, 0.5f, 0,
-        0, 0, 0, 1
-    }; 
-    
-    Mat4 view_transform = {
-        1, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0.3f, 1
-    };
-
-    // clang-format on
 
     UniformBufferObject uniform_buffer_object = {
         .model = MAT4_IDENTITY,
@@ -1940,14 +1874,20 @@ VkResult load_texture(VulkanRenderer* renderer, const char* filename) {
 
     Buffer staging_buffer = {};
 
+    u32 shared_buffer_queue_family_indices[] = {
+        get_queue_family_index(renderer, QueueFamilies::Type::GRAPHICS),
+        get_queue_family_index(renderer, QueueFamilies::Type::TRANSFER)
+    };
+
     BufferAllocationInfo buffer_allocation_info = {
         .buffer = &staging_buffer,
         .usage_flags = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        .memory_properties = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+        .memory_properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
         .size = texture->image_data.size,
-        .sharing_mode = VK_SHARING_MODE_EXCLUSIVE,
-        .queue_families_indices_count = 0,
-        .queue_family_indices = nullptr
+        .sharing_mode = VK_SHARING_MODE_CONCURRENT,
+        .queue_families_indices_count = 2,
+        .queue_family_indices = shared_buffer_queue_family_indices,
+        .map_memory = true
     };
 
     result = create_buffer(renderer, &buffer_allocation_info);
@@ -1973,9 +1913,9 @@ VkResult load_texture(VulkanRenderer* renderer, const char* filename) {
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .tiling = VK_IMAGE_TILING_OPTIMAL,
         .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .queueFamilyIndexCount = 0,
-        .pQueueFamilyIndices = nullptr,
+        .sharingMode = VK_SHARING_MODE_CONCURRENT,
+        .queueFamilyIndexCount = 2,
+        .pQueueFamilyIndices = shared_buffer_queue_family_indices,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
     };
 
@@ -2223,6 +2163,49 @@ VkResult transition_image_layout(VulkanRenderer* renderer, VkImage image, VkForm
         printf("vkQueueWaitIdle() failed.\n");
         return result;
     }
+
+    return result;
+}
+
+Sprite* create_sprite(VulkanRenderer* renderer, size_t texture_id) {
+    Sprite* sprite = (Sprite*)malloc(sizeof(Sprite));
+
+    sprite->texture = &renderer->texture_atlas.textures[texture_id];
+    // sprite->dimensions = {
+    //     .start = { 0.0f, 0.0f },
+    //     .end = {
+    //         (f32)sprite->texture->image_data.width,
+    //         (f32)sprite->texture->image_data.height }
+    // };
+
+    // clang-format off
+    sprite->transform.translation = {
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1
+    };
+
+    sprite->transform.rotation = {
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1
+    };
+
+    sprite->transform.scale = {
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1
+    };
+    // clang-format on
+
+    return sprite;
+}
+
+VkResult update_sprites(VulkanRenderer* renderer, Sprite* sprites[]) {
+    VkResult result = VK_ERROR_UNKNOWN;
 
     return result;
 }
